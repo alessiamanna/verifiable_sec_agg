@@ -1,0 +1,88 @@
+#ifndef MSG_TYPE_H
+#define MSG_TYPE_H
+
+//define message types. 4 messages will be sent during protocol execution, 2 from nodes 2 from server
+
+#include "common.h"
+#include "common_share.h"
+
+typedef enum{
+    MSG_NODE_SEND_LOCAL_UPDATE = 0x01,
+    MSG_SRV_SEND_DROP_LIST = 0x02,
+    MSG_NODE_SEND_SHARES = 0x03,
+    MSG_SRV_SEND_GLOBAL_UPDATE = 0x04,
+    MSG_TA_MASK_SETUP = 0x05
+} msg_type;
+
+
+// ------ NODE MESSAGES ------
+
+
+// In the first phase of the protocol, each participating node sends a message containing: 
+// 1. n0 = y_j ^ l_i
+// 2. n1 = y_hat_j ^ l_{i+1}
+// 3. n2 = H(y_j || y_hat_j || l_{i+2})
+//where y_j = x_j + d_i + d_{i+1} and y_hat_i = x_hat_i + d_{i+2} + d_{i+3}
+
+typedef struct __attribute__((packed)) node_local_update_s{
+    msg_type type;
+    node_id_t node_id;
+    
+    payload_t n_0;
+    payload_t n_1;
+    private_key_t n_2;
+
+}node_local_update_t;
+
+// In the second phase of the protocol, each alive node sends a message containing:
+// 1. n5 = S = {S_0^{J,M}} and so on, where each subset is a set of virtual shares that J node can recover for the M node
+// 2. n6 = H(S || l_{i+4})
+typedef struct __attribute__((packed)) node_shares_msg_s{
+    msg_type type;
+    node_id_t node_id;
+
+    share_cnt_t item_cnt;
+    share_item_t items[MAX_SHARES];
+    private_key_t n_6;
+
+} node_shares_msg_t;
+
+// ------ SERVER MESSAGES ------
+
+//  In the first phase of the protocol, the server sends to each participating node: 
+//  1. n3 = Z_j = {J/J'} which is the set of dropouts
+//  2. n4 = H(Z_j || l_{i+3})  
+typedef struct __attribute__((packed)) srv_dropout_list_s{
+    msg_type type;
+    srv_id_t srv_id;
+    node_set_t n_3;
+    private_key_t n_4;
+
+} srv_dropout_list_t;
+
+
+//  In the second phase of the protocol, the server sends to each node:
+//  1. n7 = x_sum xor l_{i+5}
+//  2. n8 = x_hat_sum xor l_{i+6}
+//  3. n9 = H(x_sum || x_hat_sum || l_{i+7})
+
+typedef struct __attribute__((packed)) srv_global_update_s{
+    msg_type type;
+    srv_id_t srv_id;
+
+    payload_t n_7;
+    payload_t n_8;
+    private_key_t n_9;
+} srv_global_update_t;
+
+// In the initialization procedure, the Trusted Authority sends precomputed masks to the server,
+// considering the sum of the mask of each node that can participate to the protocol
+
+typedef struct __attribute__((packed)) ta_mask_setup_s{
+    msg_type type;
+
+    payload_t global_mask_sum;
+    payload_t global_mask_verif;
+} ta_mask_setup_t;
+
+#endif

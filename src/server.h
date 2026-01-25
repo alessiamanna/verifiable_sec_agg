@@ -1,0 +1,63 @@
+#ifndef SERVER_H
+#define SERVER_H
+
+#include <string.h>
+#include "common.h"
+#include "common_share.h"
+#include "puf_data.h"
+#include "sss/sss.h"
+
+#define DB_IDX_MASK_DATA   0
+#define DB_IDX_NOISE_DATA  1
+#define DB_IDX_MASK_VERIF  2
+#define DB_IDX_NOISE_VERIF 3
+
+typedef struct server_s server_t;
+typedef void(*srv_state_function_t)(server_t*);
+
+struct server_s{
+    srv_id_t srv_id;
+    srv_state_function_t current_state;
+
+    puf_index_t current_link_srv;
+
+    node_set_t J_set;
+    node_set_t J_prime_set;
+    node_set_t Z_set; //dropouts
+
+    update_t aggr_sum[UPDATE_LEN];
+    update_t aggr_verif[UPDATE_LEN];
+
+    //masks sent from the TA
+    update_t ta_mask_x[UPDATE_LEN];
+    update_t ta_mask_hat[UPDATE_LEN];
+
+    update_t active_noise_x[UPDATE_LEN];
+    update_t active_noise_hat[UPDATE_LEN];
+
+    update_t dropped_mask_x[UPDATE_LEN];
+    update_t droppes_mask_hat[UPDATE_LEN];
+    io_interface_t io;
+
+};
+
+void server_setup(server_t *srv, srv_id_t id, io_interface_t io);
+void server_run_state(server_t *srv);
+
+void server_set_ta_sums(server_t* srv, update_t* sum_data, update_t* sum_verif);
+
+// Functions to handle offset DB
+void server_db_store_offset(node_id_t helper_id, node_id_t target_id, int type_index, uint8_t* offset);
+
+void server_db_init();
+
+// To recover offset during recovering phase
+uint8_t* server_db_get_offset(node_id_t helper_id, node_id_t target_id, int type_index);
+
+// ------ FSM STATES ------
+void srv_state_wait_updates(server_t* srv);
+void srv_state_req_shares(server_t* srv);
+void srv_state_wait_recovery(server_t* srv);
+void srv_state_compute_global(server_t* srv);
+
+#endif

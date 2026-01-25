@@ -1,16 +1,23 @@
 #ifndef PUF_DATA_H
 #define PUF_DATA_H
 
+#include "common.h"
+
 // --- DEFINITIONS ---
 #define CHAIN_LEN 100
 #define MAX_NUM_CLIENTS 4
 #define PUF_SIZE_BYTE 16
 
-// Define 128bit data type
-typedef unsigned _BitInt(128) uint128_t;
+// define puf response
+typedef uint128_t puf_resp_t;
+
+//define puf link, index in the array
+typedef uint8_t puf_index_t;
+
+
 
 // ---------------- TRUSTED AUTHORITY CHAIN ----------------
-static const uint128_t PUF_CHAIN_TA[MAX_NUM_CLIENTS][CHAIN_LEN] = {
+static const puf_resp_t PUF_CHAIN_TA[MAX_NUM_CLIENTS][CHAIN_LEN] = {
     {
         0x34412BB91022A67C084D746D8B9CF20Fuwb,
         0x86806DEE6483457580029754A92A90D5uwb,
@@ -123,7 +130,7 @@ static const uint128_t PUF_CHAIN_TA[MAX_NUM_CLIENTS][CHAIN_LEN] = {
 
 
 // ---------------- SERVER CHAIN ----------------
-static const unsigned _BitInt(128) PUF_CHAIN_SRV[100] = {
+static const puf_resp_t PUF_CHAIN_SRV[100] = {
     0xE8F68D53DD16B633854FF6B9A7063722uwb,
     0x61248A1B0C8A7990A083581C2CA84E99uwb,
     0x7AD01EF8C475D086CE99795CF4F02E0Buwb,
