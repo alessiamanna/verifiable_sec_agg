@@ -30,7 +30,7 @@ typedef struct __attribute__((packed)) node_local_update_s{
     
     payload_t n_0;
     payload_t n_1;
-    private_key_t n_2;
+    hmac_t n_2;
 
 }node_local_update_t;
 
@@ -43,7 +43,7 @@ typedef struct __attribute__((packed)) node_shares_msg_s{
 
     share_cnt_t item_cnt;
     share_item_t items[MAX_SHARES];
-    private_key_t n_6;
+    hmac_t n_6;
 
 } node_shares_msg_t;
 
@@ -56,7 +56,7 @@ typedef struct __attribute__((packed)) srv_dropout_list_s{
     msg_type type;
     srv_id_t srv_id;
     node_set_t n_3;
-    private_key_t n_4;
+    hmac_t n_4;
 
 } srv_dropout_list_t;
 
@@ -72,7 +72,7 @@ typedef struct __attribute__((packed)) srv_global_update_s{
 
     payload_t n_7;
     payload_t n_8;
-    private_key_t n_9;
+    hmac_t n_9;
 } srv_global_update_t;
 
 // In the initialization procedure, the Trusted Authority sends precomputed masks to the server,

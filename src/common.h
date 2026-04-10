@@ -40,6 +40,8 @@
 #define OFF_MASK_VERIF 6
 #define OFF_NOISE_VERIF 7
 
+#define SHA256_DIGEST 32
+
 // Define 128bit data type. Requires C23.
 typedef unsigned _BitInt(128) uint128_t;
 
@@ -50,7 +52,8 @@ typedef uint128_t protocol_key_t;
 typedef uint16_t node_id_t;
 typedef uint16_t srv_id_t;
 
-typedef uint32_t private_key_t;
+//to hold sha256 32byte digest
+typedef uint8_t hmac_t[SHA256_DIGEST];
 
 //enum for protocol states 
 typedef enum{
@@ -74,17 +77,6 @@ typedef struct{
 
 // Utility functions
 
-static inline private_key_t calc_hmac_sign(const void* data, size_t data_len, private_key_t key){
-    const uint8_t* bytes = (const uint8_t*)data;
-    private_key_t hash = key;
-
-    for(size_t i = 0; i < data_len; i++){
-        hash = ((hash << 5) + hash) ^ bytes[i];
-    }
-
-    return hash;
-}
-
-
+void calc_hmac_sha256(const uint8_t* data, size_t data_len, const uint8_t* key, size_t key_len, hmac_t out_mac);
 
 #endif

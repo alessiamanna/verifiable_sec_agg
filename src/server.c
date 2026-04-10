@@ -165,11 +165,15 @@ void srv_state_wait_updates(server_t* srv){
     memcpy(hash_buff, &y_clean, sizeof(payload_t));
     memcpy(hash_buff + sizeof(payload_t), &y_hat_clean, sizeof(payload_t));
 
-    private_key_t calc_hmac = calc_hmac_sign(hash_buff, sizeof(hash_buff), (private_key_t)l_2);
+    hmac_t calc_hmac;
+    calc_hmac_sha256(hash_buff, sizeof(hash_buff), 
+                     (uint8_t*)&l_2, sizeof(puf_resp_t), 
+                     calc_hmac);
 
     // Integrity compromised
-    if(calc_hmac != rcv_msg.n_2){
-        printf("[SERVER HMAC mismatch. Expected 0x%X, received 0x%X from node %d\n", calc_hmac, rcv_msg.n_2, rcv_msg.node_id);
+    if(memcmp(calc_hmac, rcv_msg.n_2, SHA256_DIGEST) != 0){
+        printf("[SERVER] HMAC mismatch from node %d\n", rcv_msg.node_id);
+        return; // Important: Stop processing if integrity fails!
     }
 
     #if DEBUG 
@@ -226,7 +230,9 @@ void srv_state_req_shares(server_t* srv){
     puf_index_t srv_idx = srv->current_link_srv;
     puf_resp_t l_3 = get_puf_link_srv(srv_idx + OFF_SRV_3);
 
-    srv_drop_msg.n_4 = calc_hmac_sign(&srv_drop_msg.n_3, sizeof(srv_drop_msg.n_3), l_3);
+    calc_hmac_sha256((uint8_t*)&srv_drop_msg.n_3, sizeof(srv_drop_msg.n_3), 
+                     (uint8_t*)&l_3, sizeof(puf_resp_t), 
+                     srv_drop_msg.n_4);
 
     srv->io.send(srv->io.obj, (uint8_t*)&srv_drop_msg, sizeof(srv_drop_msg));
 
@@ -265,9 +271,12 @@ void srv_state_wait_recovery(server_t* srv){
     
     size_t payload_size = share_msg.item_cnt * sizeof(share_item_t); 
     
-    private_key_t calc_hmac = calc_hmac_sign((uint8_t*)share_msg.items, payload_size, (private_key_t)l_4_srv);
+    hmac_t calc_hmac;
+    calc_hmac_sha256((uint8_t*)share_msg.items, payload_size, 
+                     (uint8_t*)&l_4_srv, sizeof(puf_resp_t), 
+                     calc_hmac);
 
-    if (calc_hmac != share_msg.n_6) {
+    if (memcmp(calc_hmac, share_msg.n_6, SHA256_DIGEST) != 0) {
         #if DEBUG
         printf("[SERVER] HMAC Mismatch from node %d. Ignoring.\n", share_msg.node_id);
         #endif
@@ -435,7 +444,9 @@ void srv_state_compute_global(server_t* srv){
     memcpy(hash_buf, &msg.n_7, sizeof(msg.n_7));
     memcpy(hash_buf + sizeof(msg.n_7), &msg.n_8, sizeof(msg.n_8));
     
-    msg.n_9 = calc_hmac_sign(hash_buf, sizeof(hash_buf), (private_key_t)l7_key);
+    calc_hmac_sha256(hash_buf, sizeof(hash_buf), 
+                     (uint8_t*)&l7_key, sizeof(puf_resp_t), 
+                     msg.n_9);
 
     srv->io.send(srv->io.obj, (uint8_t*)&msg, sizeof(msg));
 

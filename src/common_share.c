@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -14,14 +15,26 @@ protocol_key_t get_shared_key(node_id_t helper_node, node_id_t target_node){
 void compute_share_h(puf_resp_t puf_link, protocol_key_t key, uint8_t* out_share) {
     memset(out_share, 0, sss_SHARE_LEN);
 
-    private_key_t seed_hash = calc_hmac_sign(&puf_link, sizeof(puf_resp_t), (private_key_t)key);
+    hmac_t seed_hash;
 
-    uint64_t current_val = (uint64_t)seed_hash; 
-
+    calc_hmac_sha256((uint8_t*)&puf_link, sizeof(puf_resp_t), (uint8_t*)&key, sizeof(protocol_key_t), seed_hash);
+   
+    size_t copied = 0;
     //mi serve espandere a 113byte
-    for(int i = 0; i < sss_SHARE_LEN; i++) {
-        current_val = current_val * 6364136223846793005ULL + 1442695040888963407ULL;
-        out_share[i] = (uint8_t)(current_val >> 56);
+   while (copied < sss_SHARE_LEN) {
+        size_t to_copy = (sss_SHARE_LEN - copied > SHA256_DIGEST) ? 
+                          SHA256_DIGEST : (sss_SHARE_LEN - copied);
+        
+        memcpy(out_share + copied, seed_hash, to_copy);
+        copied += to_copy;
+
+        if (copied < sss_SHARE_LEN) {
+            hmac_t next_hash;
+            calc_hmac_sha256(seed_hash, SHA256_DIGEST, 
+                             (uint8_t*)&key, sizeof(protocol_key_t), 
+                             next_hash);
+            memcpy(seed_hash, next_hash, SHA256_DIGEST);
+        }
     }
 }
 

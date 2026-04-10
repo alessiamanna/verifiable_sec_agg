@@ -91,11 +91,10 @@ void node_state_compute_update(node_t *node){
     memcpy(hash_buff + sizeof(payload_t), &y_j_hat, sizeof(payload_t));
 
     // compute hmac
-    private_key_t node_hmac_key;
     puf_index_t hmac_idx = (node->current_link_srv + 2);
-    node_hmac_key = (private_key_t)get_puf_link_srv(hmac_idx);
+    puf_resp_t node_hmac_key = get_puf_link_srv(hmac_idx);
 
-    local_update_msg.n_2 = calc_hmac_sign(hash_buff, sizeof(hash_buff), node_hmac_key);    
+    calc_hmac_sha256(hash_buff, sizeof(hash_buff), (uint8_t*)&node_hmac_key, sizeof(puf_resp_t), local_update_msg.n_2);
 
     if(node->io.send(node->io.obj, (uint8_t*)&local_update_msg, sizeof(local_update_msg)) == OK){
         #if DEBUG
@@ -133,14 +132,17 @@ void node_state_wait_for_server(node_t *node){
     #endif
 
     // Check if HMAC 
-    puf_index_t hmac_idx = node->current_link_srv + OFF_SRV_3;
-    private_key_t hmac_key = (private_key_t)get_puf_link_srv(hmac_idx);
+  puf_index_t hmac_idx = node->current_link_srv + OFF_SRV_3;
+    puf_resp_t hmac_key = get_puf_link_srv(hmac_idx);
 
-    private_key_t calc_hmac = calc_hmac_sign(&srv_dropout_msg.n_3, sizeof(srv_dropout_msg.n_3), hmac_key);
+    hmac_t calc_hmac;
+    calc_hmac_sha256((uint8_t*)&srv_dropout_msg.n_3, sizeof(srv_dropout_msg.n_3), 
+                     (uint8_t*)&hmac_key, sizeof(puf_resp_t), 
+                     calc_hmac);
     
-    if(calc_hmac != srv_dropout_msg.n_4){
+    if(memcmp(calc_hmac, srv_dropout_msg.n_4, SHA256_DIGEST) != 0){
         #if DEBUG
-        printf("[NODE %d] HMAC mismatch. Expected 0x%X, received 0x%X from node %d\n", calc_hmac, srv_dropout_msg.n_4, node->node_id);
+        printf("[NODE %d] HMAC mismatch on dropout list!\n", node->node_id);
         #endif
     }
 
@@ -202,15 +204,15 @@ void node_state_wait_for_server(node_t *node){
     }
 
     // Once the set S has been computed, we have to compute the HMAC
-    private_key_t node_hmac_key;
-    puf_index_t  hmac_index = (node->current_link_srv + OFF_SRV_4);
-    node_hmac_key = (private_key_t)get_puf_link_srv(hmac_index);
+    puf_index_t hmac_index = (node->current_link_srv + OFF_SRV_4);
+    puf_resp_t node_hmac_key = get_puf_link_srv(hmac_index);
 
     size_t payload_size = share_rec_msg.item_cnt * sizeof(share_item_t);
-
     uint8_t* payload_ptr = (uint8_t*)share_rec_msg.items;
     
-    share_rec_msg.n_6 = calc_hmac_sign(payload_ptr, payload_size, node_hmac_key);
+    calc_hmac_sha256(payload_ptr, payload_size, 
+                     (uint8_t*)&node_hmac_key, sizeof(puf_resp_t), 
+                     share_rec_msg.n_6);
 
     // We send the message to the server
     node->io.send(node->io.obj, (uint8_t*)&share_rec_msg, sizeof(share_rec_msg));
@@ -246,18 +248,18 @@ void node_state_wait_final(node_t *node){
     clean_verif = decrypt_puf(final_msg.n_8, mask_verif);
 
     puf_index_t hmac_idx = srv_idx + OFF_SRV_7;
-    private_key_t hmac_key = (private_key_t)get_puf_link_srv(hmac_idx);
+    puf_resp_t hmac_key = get_puf_link_srv(hmac_idx);
 
     uint8_t hash_buff[sizeof(payload_t) * 2];
     memcpy(hash_buff, &final_msg.n_7, sizeof(final_msg.n_7));
     memcpy(hash_buff + sizeof(payload_t), &final_msg.n_8, sizeof(final_msg.n_8));
-    private_key_t calc_hmac = calc_hmac_sign(hash_buff, sizeof(hash_buff), hmac_key);
+    
+    hmac_t calc_hmac;
+    calc_hmac_sha256(hash_buff, sizeof(hash_buff), 
+                     (uint8_t*)&hmac_key, sizeof(puf_resp_t), 
+                     calc_hmac);
 
-    printf("[NODE %d DEBUG] HMAC Check:\n", node->node_id);
-    printf("   -> Calculated: 0x%X\n", calc_hmac);
-    printf("   -> Received:   0x%X\n", final_msg.n_9);
-
-    if(calc_hmac != final_msg.n_9){
+    if(memcmp(calc_hmac, final_msg.n_9, SHA256_DIGEST) != 0){
         #if DEBUG
         printf("[NODE %d] INTEGRITY ERROR: Global Update HMAC mismatch!\n", node->node_id);
         #endif
