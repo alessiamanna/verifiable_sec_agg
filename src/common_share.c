@@ -7,7 +7,7 @@
 #include "puf_utils.h"
 #include "sss/sss.h"
 #include "common_share.h"
-
+#include "crypto_utils.h"
 protocol_key_t get_shared_key(node_id_t helper_node, node_id_t target_node){
     return (protocol_key_t)helper_node ^ (protocol_key_t)target_node ^ 0xCAFEBABE;
 }

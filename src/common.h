@@ -9,6 +9,8 @@
 #define MAX_NUM_CLIENTS 4 //for now let's consider node A-B-C-D
 #define INITIAL_LINK 0 
 
+
+//TODO: these values should be generated through a random seed 
 #define VERIF_A 3
 #define VERIF_B 5
 
@@ -74,9 +76,5 @@ typedef struct{
     prt_snd_fn send; //function to send data
     prt_rcv_fn recv; //function to receive data
 } io_interface_t;
-
-// Utility functions
-
-void calc_hmac_sha256(const uint8_t* data, size_t data_len, const uint8_t* key, size_t key_len, hmac_t out_mac);
 
 #endif

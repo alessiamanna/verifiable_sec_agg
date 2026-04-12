@@ -5,6 +5,7 @@
 #include "msg_type.h"
 #include "puf_utils.h"
 #include "sss/sss.h"
+#include "crypto_utils.h"
 
 #include <stdio.h>
 #include <string.h>
@@ -160,28 +161,16 @@ void srv_state_wait_updates(server_t* srv){
 
     // HMAC check == n2?
     puf_resp_t l_2 = get_puf_link_srv(srv_idx + OFF_SRV_2);
-
-    uint8_t hash_buff[sizeof(payload_t)*2];
-    memcpy(hash_buff, &y_clean, sizeof(payload_t));
-    memcpy(hash_buff + sizeof(payload_t), &y_hat_clean, sizeof(payload_t));
-
     hmac_t calc_hmac;
-    calc_hmac_sha256(hash_buff, sizeof(hash_buff), 
-                     (uint8_t*)&l_2, sizeof(puf_resp_t), 
-                     calc_hmac);
+    sign_payload(y_clean, y_hat_clean, l_2, calc_hmac);
 
-    // Integrity compromised
-    if(memcmp(calc_hmac, rcv_msg.n_2, SHA256_DIGEST) != 0){
+    if(!verify_hmac(calc_hmac, rcv_msg.n_2)){
         printf("[SERVER] HMAC mismatch from node %d\n", rcv_msg.node_id);
-        return; // Important: Stop processing if integrity fails!
+        return; 
     }
 
     #if DEBUG 
     printf("[SERVER] aggregating update from %d\n", rcv_msg.node_id);
-    #endif
-
-    #if DEBUG
-    printf("[SERVER] Received Update from Node %d. Raw Val[0]: %u\n", rcv_msg.node_id, (uint32_t)((update_t*)&y_clean)[0]);
     #endif
 
     // Aggregate partial sum 
@@ -229,10 +218,8 @@ void srv_state_req_shares(server_t* srv){
     // Compute HMAC
     puf_index_t srv_idx = srv->current_link_srv;
     puf_resp_t l_3 = get_puf_link_srv(srv_idx + OFF_SRV_3);
-
-    calc_hmac_sha256((uint8_t*)&srv_drop_msg.n_3, sizeof(srv_drop_msg.n_3), 
-                     (uint8_t*)&l_3, sizeof(puf_resp_t), 
-                     srv_drop_msg.n_4);
+    
+    sign_node_set(&srv_drop_msg.n_3, l_3, srv_drop_msg.n_4);
 
     srv->io.send(srv->io.obj, (uint8_t*)&srv_drop_msg, sizeof(srv_drop_msg));
 
@@ -268,21 +255,16 @@ void srv_state_wait_recovery(server_t* srv){
     // HMAC == n_6? check msg integrity
     puf_index_t srv_idx = srv->current_link_srv;
     puf_resp_t l_4_srv = get_puf_link_srv(srv_idx + OFF_SRV_4);
-    
-    size_t payload_size = share_msg.item_cnt * sizeof(share_item_t); 
-    
     hmac_t calc_hmac;
-    calc_hmac_sha256((uint8_t*)share_msg.items, payload_size, 
-                     (uint8_t*)&l_4_srv, sizeof(puf_resp_t), 
-                     calc_hmac);
 
-    if (memcmp(calc_hmac, share_msg.n_6, SHA256_DIGEST) != 0) {
+    sign_shares_list(share_msg.items, share_msg.item_cnt, l_4_srv, calc_hmac);
+
+    if (!verify_hmac(calc_hmac, share_msg.n_6)) {
         #if DEBUG
         printf("[SERVER] HMAC Mismatch from node %d. Ignoring.\n", share_msg.node_id);
         #endif
         return;
     }
-
     #if DEBUG
     printf("[SERVER] Processing %d shares from node %d\n", share_msg.item_cnt, share_msg.node_id);
     #endif
@@ -439,15 +421,7 @@ void srv_state_compute_global(server_t* srv){
     msg.n_8 = encrypt_puf(payload_verif, l6);
    
     puf_resp_t l7_key = get_puf_link_srv(srv_idx + OFF_SRV_7);
-    
-    uint8_t hash_buf[sizeof(payload_t)*2]; 
-    memcpy(hash_buf, &msg.n_7, sizeof(msg.n_7));
-    memcpy(hash_buf + sizeof(msg.n_7), &msg.n_8, sizeof(msg.n_8));
-    
-    calc_hmac_sha256(hash_buf, sizeof(hash_buf), 
-                     (uint8_t*)&l7_key, sizeof(puf_resp_t), 
-                     msg.n_9);
-
+    sign_payload(msg.n_7, msg.n_8, l7_key, msg.n_9);
     srv->io.send(srv->io.obj, (uint8_t*)&msg, sizeof(msg));
 
     printf("[SERVER] Global Update Sent. Round Complete.\n");
