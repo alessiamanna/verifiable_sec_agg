@@ -4,10 +4,12 @@
 
 #include "node.h"
 #include "common.h"
+#include "common_share.h"
 #include "msg_type.h"
 #include "puf_data.h"
 #include "puf_utils.h"
 #include "crypto_utils.h"
+#include "puf_manager.h"
 #include "sss/sss.h"
 
 
@@ -36,24 +38,22 @@ void node_state_compute_update(node_t *node){
     // Prepare the message 
     node_local_update_t local_update_msg;
     memset(&local_update_msg, 0, sizeof(node_local_update_t));
-
     local_update_msg.type = MSG_NODE_SEND_LOCAL_UPDATE;
     local_update_msg.node_id = node->node_id;
 
     // The node computes y_j and y_hat_j to send to the server
     // We need to retrieve links from the TA
-    puf_index_t ta_idx = node->current_link_ta;
+    ta_chains_t ta_chains;
+    get_ta_chains(node->node_id, node->current_link_ta, &ta_chains);
 
-    puf_resp_t d_i = get_puf_link_ta(node->node_id, ta_idx + LINK_MASK_DATA);
-    puf_resp_t d_i_1 = get_puf_link_ta(node->node_id, ta_idx + LINK_NOISE_DATA);
-    puf_resp_t d_i_2 = get_puf_link_ta(node->node_id, ta_idx + LINK_MASK_VERIF);
-    puf_resp_t d_i_3 = get_puf_link_ta(node->node_id, ta_idx + LINK_NOISE_VERIF);
+    transport_chain_t srv_chain;
+    get_transport_chain(node->current_link_srv, &srv_chain);
 
     //pointers to mask, so they are treated like 16bits * N components arrays like the model update
-    uint16_t* p_d_i = (uint16_t*)&d_i;
-    uint16_t* p_d_i_1 = (uint16_t*)&d_i_1;
-    uint16_t* p_d_i_2 = (uint16_t*)&d_i_2;
-    uint16_t* p_d_i_3 = (uint16_t*)&d_i_3;
+    uint16_t* p_d_i = (uint16_t*)&ta_chains.mask_chain.d_mask_data;
+    uint16_t* p_d_i_1 = (uint16_t*)&ta_chains.mask_chain.d_noise_data;
+    uint16_t* p_d_i_2 = (uint16_t*)&ta_chains.mask_chain.d_mask_verif;
+    uint16_t* p_d_i_3 = (uint16_t*)&ta_chains.mask_chain.d_noise_verif;
 
     update_t temp_update[UPDATE_LEN];
     update_t temp_verif[UPDATE_LEN];
@@ -74,23 +74,11 @@ void node_state_compute_update(node_t *node){
     memcpy(&y_j, temp_update, sizeof(y_j));
     memcpy(&y_j_hat, temp_verif, sizeof(y_j_hat));
 
-    //current link of the server for transport operations
-    puf_index_t srv_idx = node->current_link_srv;
-
-    //retrieve links
-    puf_resp_t l_0 = get_puf_link_srv(srv_idx + OFF_SRV_0);
-    puf_resp_t l_1 = get_puf_link_srv(srv_idx + OFF_SRV_1);
-
     //packet construction
-    local_update_msg.n_0 = encrypt_puf(y_j, l_0);
-    local_update_msg.n_1 = encrypt_puf(y_j_hat, l_1);
+    local_update_msg.n_0 = encrypt_puf(y_j, srv_chain.l_0_data);
+    local_update_msg.n_1 = encrypt_puf(y_j_hat, srv_chain.l_1_verif);
 
-
-    // compute hmac
-    puf_index_t hmac_idx = (node->current_link_srv + OFF_SRV_2);
-    puf_resp_t node_hmac_key = get_puf_link_srv(hmac_idx);
-
-    sign_payload(y_j, y_j_hat, node_hmac_key, local_update_msg.n_2);
+    sign_payload(y_j, y_j_hat, srv_chain.l_2_hmac_local, local_update_msg.n_2);
 
     if(node->io.send(node->io.obj, (uint8_t*)&local_update_msg, sizeof(local_update_msg)) == OK){
         #if DEBUG
@@ -113,6 +101,13 @@ void node_state_wait_for_server(node_t *node){
     // It then checks the HMAC of the received message
     // Once verified, it checks if it can recover a share for any of the nodes in Z_j
 
+  
+    // Check if HMAC 
+    transport_chain_t srv_chain;
+    get_transport_chain(node->current_link_srv, &srv_chain);
+
+    ta_chains_t ta_chains;
+    get_ta_chains(node->node_id, node->current_link_ta, &ta_chains);
     srv_dropout_list_t srv_dropout_msg;
     memset(&srv_dropout_msg, 0, sizeof(srv_dropout_list_t));
     size_t out_len = 0;
@@ -127,12 +122,8 @@ void node_state_wait_for_server(node_t *node){
     printf("[NODE %d] Received dropout set from the server. Checking if shares can be recovered \n", node->node_id);
     #endif
 
-    // Check if HMAC 
-    puf_index_t hmac_idx = node->current_link_srv + OFF_SRV_3;
-    puf_resp_t hmac_key = get_puf_link_srv(hmac_idx);
-
     hmac_t calc_hmac;
-    sign_node_set(&srv_dropout_msg.n_3, hmac_key, calc_hmac);
+    sign_node_set(&srv_dropout_msg.n_3, srv_chain.l_3_hmac_drop, calc_hmac);
     
     if(!verify_hmac(calc_hmac, srv_dropout_msg.n_4)){
         printf("[NODE %d] HMAC mismatch on dropout list!\n", node->node_id);
@@ -141,13 +132,11 @@ void node_state_wait_for_server(node_t *node){
     // Message to send back to the server containing the shares
     node_shares_msg_t share_rec_msg;
     memset(&share_rec_msg, 0, sizeof(node_shares_msg_t));
-
     share_rec_msg.type = MSG_NODE_SEND_SHARES;
     share_rec_msg.node_id = node->node_id;
     share_rec_msg.item_cnt = 0;
 
     node_set_t Z_j = srv_dropout_msg.n_3;
-    puf_index_t ta_base_index = node->current_link_ta;
 
     for(int i = 0; i < node->K_j.node_count; i++){
         if (share_rec_msg.item_cnt >= MAX_SHARES) break; 
@@ -166,33 +155,23 @@ void node_state_wait_for_server(node_t *node){
             //implementa la logica di recupero delle share.
             item_data->type = SHARE_TYPE_MASK;
 
-            puf_resp_t l_4 = get_puf_link_ta(node->node_id, ta_base_index + LINK_TA_4);
-            printf("base index %d", ta_base_index);
-            compute_share_h(l_4, shared_key, item_data->share_data);
-        
-            puf_resp_t l_6 = get_puf_link_ta(node->node_id, ta_base_index + LINK_TA_6);
-            compute_share_h(l_6, shared_key, item_data->share_verif);
+            compute_share_h(ta_chains.share_chain.share_mask,       shared_key, item_data->share_data);
+            compute_share_h(ta_chains.share_chain.share_mask_verif, shared_key, item_data->share_verif);
         }
         else{
             // Otherwise, we only have to recover the shares to remove the noise.
             item_data->type = SHARE_TYPE_NOISE;
             //implementa la logica di recupero delle share.
             printf("I'm here\n");
-            puf_resp_t l_5 = get_puf_link_ta(node->node_id, ta_base_index + LINK_TA_5);
-            compute_share_h(l_5, shared_key, item_data->share_data);
-
-            puf_resp_t l_7 = get_puf_link_ta(node->node_id, ta_base_index + LINK_TA_7);
-            compute_share_h(l_7, shared_key, item_data->share_verif);
+            compute_share_h(ta_chains.share_chain.share_noise,       shared_key, item_data->share_data);
+            compute_share_h(ta_chains.share_chain.share_noise_verif, shared_key, item_data->share_verif);
 
         }
         share_rec_msg.item_cnt++;
 
     }
 
-    puf_index_t hmac_index = (node->current_link_srv + OFF_SRV_4);
-    puf_resp_t node_hmac_key = get_puf_link_srv(hmac_index);
-
-    sign_shares_list(share_rec_msg.items, share_rec_msg.item_cnt, node_hmac_key, share_rec_msg.n_6);
+    sign_shares_list(share_rec_msg.items, share_rec_msg.item_cnt, srv_chain.l_4_hmac_shares, share_rec_msg.n_6);
 
     // We send the message to the server
     node->io.send(node->io.obj, (uint8_t*)&share_rec_msg, sizeof(share_rec_msg));
@@ -203,6 +182,8 @@ void node_state_wait_final(node_t *node){
     #if DEBUG
     printf("[NODE %d] Finalizing aggregation\n", node->node_id);
     #endif
+    transport_chain_t srv_chain;
+    get_transport_chain(node->current_link_srv, &srv_chain );
 
     srv_global_update_t final_msg;
     size_t out_len;
@@ -214,24 +195,12 @@ void node_state_wait_final(node_t *node){
         return;
     }
 
-    // Unmasking
-    puf_index_t srv_idx = node->current_link_srv;
-
-    puf_resp_t mask_sum = get_puf_link_srv(srv_idx + OFF_SRV_5);
-    puf_resp_t mask_verif = get_puf_link_srv(srv_idx + OFF_SRV_6);
-
-    payload_t clean_sum;
-    payload_t clean_verif;
-
     // decrypt
-    clean_sum = decrypt_puf(final_msg.n_7, mask_sum);
-    clean_verif = decrypt_puf(final_msg.n_8, mask_verif);
-
-    puf_index_t hmac_idx = srv_idx + OFF_SRV_7;
-    puf_resp_t hmac_key = get_puf_link_srv(hmac_idx);
+    payload_t clean_sum = decrypt_puf(final_msg.n_7, srv_chain.l_5_final_data);
+    payload_t clean_verif = decrypt_puf(final_msg.n_8, srv_chain.l_6_final_verif);
 
     hmac_t calc_hmac;
-    sign_payload(final_msg.n_7, final_msg.n_8, hmac_key, calc_hmac);
+    sign_payload(final_msg.n_7, final_msg.n_8, srv_chain.l_7_global, calc_hmac);
 
     if(!verify_hmac(calc_hmac, final_msg.n_9)){
         printf("[NODE %d] INTEGRITY ERROR: Global Update HMAC mismatch!\n", node->node_id);
@@ -283,8 +252,8 @@ void node_state_wait_final(node_t *node){
     memcpy(node->data_update, p_sum, sizeof(node->data_update));
 
     // Update links for next iteration
-    node->current_link_ta += 4; 
-    node->current_link_srv += 8;
+    node->current_link_ta += MASK_CHAIN_LEN + SHARE_CHAIN_LEN;
+    node->current_link_srv += TRANSPORT_CHAIN_LEN;
 
     node->current_state = node_state_compute_update;
 }

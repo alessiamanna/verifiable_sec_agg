@@ -4,6 +4,7 @@
 #include "puf_data.h"
 #include "msg_type.h"
 #include "puf_utils.h"
+#include "puf_manager.h"
 #include "sss/sss.h"
 #include "crypto_utils.h"
 
@@ -151,18 +152,15 @@ void srv_state_wait_updates(server_t* srv){
 
     if(node_is_present(&srv->J_prime_set, rcv_msg.node_id)) return; //skip it if already present in this round, means the node sent the update twice in the same round
 
-    // Get srv link l0 and l1 to extract the decrypted update
-    puf_index_t srv_idx = srv->current_link_srv;
-    puf_resp_t l_0 = get_puf_link_srv(srv_idx + OFF_SRV_0);
-    puf_resp_t l_1 = get_puf_link_srv(srv_idx + OFF_SRV_1);
+    transport_chain_t srv_chain;
+    get_transport_chain(srv->current_link_srv, &srv_chain);
 
-    payload_t y_clean = decrypt_puf(rcv_msg.n_0, l_0);
-    payload_t y_hat_clean = decrypt_puf(rcv_msg.n_1, l_1);
+    payload_t y_clean = decrypt_puf(rcv_msg.n_0, srv_chain.l_0_data);
+    payload_t y_hat_clean = decrypt_puf(rcv_msg.n_1, srv_chain.l_1_verif);
 
-    // HMAC check == n2?
-    puf_resp_t l_2 = get_puf_link_srv(srv_idx + OFF_SRV_2);
+ 
     hmac_t calc_hmac;
-    sign_payload(y_clean, y_hat_clean, l_2, calc_hmac);
+    sign_payload(y_clean, y_hat_clean, srv_chain.l_2_hmac_local, calc_hmac);
 
     if(!verify_hmac(calc_hmac, rcv_msg.n_2)){
         printf("[SERVER] HMAC mismatch from node %d\n", rcv_msg.node_id);
@@ -176,7 +174,6 @@ void srv_state_wait_updates(server_t* srv){
     // Aggregate partial sum 
     vector_add(srv->aggr_sum, (update_t*)&y_clean);
     vector_add(srv->aggr_verif, (update_t*)&y_hat_clean);
-
     // Add node to set J of participating nodes 
     node_set_add(&srv->J_prime_set, rcv_msg.node_id);
 
@@ -212,14 +209,12 @@ void srv_state_req_shares(server_t* srv){
     }
 
     printf("[SERVER] Dropouts: %d\n", srv->Z_set.node_count);
-
     memcpy(&srv_drop_msg.n_3, &srv->Z_set, sizeof(node_set_t));
 
     // Compute HMAC
-    puf_index_t srv_idx = srv->current_link_srv;
-    puf_resp_t l_3 = get_puf_link_srv(srv_idx + OFF_SRV_3);
-    
-    sign_node_set(&srv_drop_msg.n_3, l_3, srv_drop_msg.n_4);
+    transport_chain_t srv_chain;
+    get_transport_chain(srv->current_link_srv, &srv_chain);
+    sign_node_set(&srv_drop_msg.n_3, srv_chain.l_3_hmac_drop, srv_drop_msg.n_4);
 
     srv->io.send(srv->io.obj, (uint8_t*)&srv_drop_msg, sizeof(srv_drop_msg));
 
@@ -252,12 +247,11 @@ void srv_state_wait_recovery(server_t* srv){
         return; 
     }
 
-    // HMAC == n_6? check msg integrity
-    puf_index_t srv_idx = srv->current_link_srv;
-    puf_resp_t l_4_srv = get_puf_link_srv(srv_idx + OFF_SRV_4);
+    transport_chain_t srv_chain;
+    get_transport_chain(srv->current_link_srv, &srv_chain);
     hmac_t calc_hmac;
 
-    sign_shares_list(share_msg.items, share_msg.item_cnt, l_4_srv, calc_hmac);
+    sign_shares_list(share_msg.items, share_msg.item_cnt, srv_chain.l_4_hmac_shares, calc_hmac);
 
     if (!verify_hmac(calc_hmac, share_msg.n_6)) {
         #if DEBUG
@@ -412,22 +406,19 @@ void srv_state_compute_global(server_t* srv){
     memcpy(&payload_sum, final_sum_vec, sizeof(payload_t));
     memcpy(&payload_verif, final_verif_vec, sizeof(payload_t));
 
-    puf_index_t srv_idx = srv->current_link_srv;
-    puf_resp_t l5 = get_puf_link_srv(srv_idx + OFF_SRV_5);
-    puf_resp_t l6 = get_puf_link_srv(srv_idx + OFF_SRV_6);
-
+    transport_chain_t srv_chain;
+    get_transport_chain(srv->current_link_srv, &srv_chain);
     // Encrpyt global sum and global sum verif to broadcast to nodes
-    msg.n_7 = encrypt_puf(payload_sum, l5);
-    msg.n_8 = encrypt_puf(payload_verif, l6);
+    msg.n_7 = encrypt_puf(payload_sum, srv_chain.l_5_final_data);
+    msg.n_8 = encrypt_puf(payload_verif, srv_chain.l_6_final_verif);
    
-    puf_resp_t l7_key = get_puf_link_srv(srv_idx + OFF_SRV_7);
-    sign_payload(msg.n_7, msg.n_8, l7_key, msg.n_9);
+    sign_payload(msg.n_7, msg.n_8, srv_chain.l_7_global, msg.n_9);
     srv->io.send(srv->io.obj, (uint8_t*)&msg, sizeof(msg));
 
     printf("[SERVER] Global Update Sent. Round Complete.\n");
 
     // Update link count
-    srv->current_link_srv += 8; 
+    srv->current_link_srv += TRANSPORT_CHAIN_LEN; 
     
     // Reset mem
     server_reset_buffers(srv);

@@ -8,13 +8,6 @@
 #define MAX_NUM_CLIENTS 4
 #define PUF_SIZE_BYTE 16
 
-// define puf response
-typedef uint128_t puf_resp_t;
-
-//define puf link, index in the array
-typedef uint8_t puf_index_t;
-
-
 
 // ---------------- TRUSTED AUTHORITY CHAIN ----------------
 static const puf_resp_t PUF_CHAIN_TA[MAX_NUM_CLIENTS][CHAIN_LEN] = {

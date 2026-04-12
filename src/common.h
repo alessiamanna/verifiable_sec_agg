@@ -15,37 +15,16 @@
 #define VERIF_B 5
 
 #define UPDATE_LEN 8 // for now let's assume 128bit update, 16 bit x 8 components.
-
-#define LINK_MASK_DATA 0
-#define LINK_NOISE_DATA 1
-#define LINK_MASK_VERIF 2
-#define LINK_NOISE_VERIF 3
-
-#define LINK_TA_4 4
-#define LINK_TA_5 5
-#define LINK_TA_6 6
-#define LINK_TA_7 7
-
-#define OFF_SRV_0 0
-#define OFF_SRV_1 1
-#define OFF_SRV_2 2
-#define OFF_SRV_3 3
-#define OFF_SRV_4 4
-#define OFF_SRV_5 5
-#define OFF_SRV_6 6
-#define OFF_SRV_7 7
-#define OFF_SRV_8 8
-#define OFF_SRV_9 9
-
-#define OFF_MASK_DATA 4 //d_{i+4} to recover d_i and so on
-#define OFF_NOISE_DATA 5
-#define OFF_MASK_VERIF 6
-#define OFF_NOISE_VERIF 7
-
 #define SHA256_DIGEST 32
 
 // Define 128bit data type. Requires C23.
 typedef unsigned _BitInt(128) uint128_t;
+
+// define puf response
+typedef uint128_t puf_resp_t;
+
+//define puf link, index in the array
+typedef uint8_t puf_index_t;
 
 typedef uint128_t payload_t;
 typedef uint16_t update_t;
