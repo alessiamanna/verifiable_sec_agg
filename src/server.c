@@ -16,8 +16,7 @@
 
 
 // DB to store the offsets precomputed by the Trusted Authority
-uint8_t server_offset_db[MAX_NUM_CLIENTS][MAX_NUM_CLIENTS][4][sss_SHARE_LEN];
-bool db_has_entry[MAX_NUM_CLIENTS][MAX_NUM_CLIENTS][4];
+static server_offset_db_t offset_db;
 
 // Keeps reconstruction context for both verifiability and data
 static recon_ctx_t ctx_mask[MAX_NUM_CLIENTS];
@@ -33,7 +32,6 @@ typedef struct{
     int db_idx_data;
     int db_idx_verif;
 } share_target_t;
-
 
 
 // Utility to print, remove later
@@ -69,47 +67,35 @@ static void vector_sub(update_t* acc, update_t* input) {
 
 // Initialize server DB with empty entries
 void server_db_init(){
-    memset(db_has_entry, 0, sizeof(db_has_entry));
-    memset(server_offset_db, 0, sizeof(server_offset_db));
+    memset(&offset_db, 0, sizeof(offset_db));
 }
 
 // Store offsets
-void server_db_store_offset(node_id_t helper, node_id_t target, int type_idx, uint8_t* offset) {
-    if (helper >= MAX_NUM_CLIENTS || target >= MAX_NUM_CLIENTS) {
+void server_db_store_offset(node_id_t helper, node_id_t target, share_db_idx_t idx, uint8_t* offset) {
+    if (helper >= MAX_NUM_CLIENTS || target >= MAX_NUM_CLIENTS || idx >= DB_IDX_COUNT) {
         #if DEBUG
-        printf("[SERVER DB] Error Store: Node ID out of bounds (H:%d, T:%d)\n", helper, target);
-        #endif
-        return;
-    }
-    
-    if (type_idx < 0 || type_idx > 3) {
-        #if DEBUG
-        printf("[SERVER DB] Error Store: Invalid Type Index %d\n", type_idx);
+            printf("[SERVER DB] Error Store: Node ID out of bounds (H:%d, T:%d)\n", helper, target);
         #endif
         return;
     }
 
-    memcpy(server_offset_db[helper][target][type_idx], offset, sss_SHARE_LEN);
-    
-    db_has_entry[helper][target][type_idx] = true;
+    share_offset_entry_t* e = &offset_db.entries[helper][target][idx];
+    memcpy(e->offset, offset, sss_SHARE_LEN);
+    e->valid = true;
 }
 
 // Function to retrieve offset value
-uint8_t* server_db_get_offset(node_id_t helper, node_id_t target, int type_idx) {
+uint8_t* server_db_get_offset(node_id_t helper, node_id_t target, share_db_idx_t idx) {
     
-    if (helper >= MAX_NUM_CLIENTS || target >= MAX_NUM_CLIENTS) {
+    if (helper >= MAX_NUM_CLIENTS || target >= MAX_NUM_CLIENTS || idx >= DB_IDX_COUNT) {
         return NULL; 
     }
+    share_offset_entry_t* e = &offset_db.entries[helper][target][idx];
     
-    if (type_idx < 0 || type_idx > 3) {
-        return NULL; 
+    if(e->valid){
+        return e->offset;
     }
-
-    if (!db_has_entry[helper][target][type_idx]) {
-        return NULL; 
-    }
-
-    return server_offset_db[helper][target][type_idx];
+    return NULL;
 }
 
 static bool dropout_recovered(server_t* srv){

@@ -8,6 +8,17 @@
 #include "puf_utils.h"
 #include "sss/sss.h"
 
+
+// index types for the database
+typedef enum{
+    DB_IDX_MASK_DATA  = 0,
+    DB_IDX_NOISE_DATA = 1,
+    DB_IDX_MASK_VERIF  = 2,
+    DB_IDX_NOISE_VERIF = 3,
+    DB_IDX_COUNT
+} share_db_idx_t;
+
+
 // per ora faccio allocazione statica
 #define MAX_SHARES 10
 

@@ -7,10 +7,17 @@
 #include "puf_data.h"
 #include "sss/sss.h"
 
-#define DB_IDX_MASK_DATA   0
-#define DB_IDX_NOISE_DATA  1
-#define DB_IDX_MASK_VERIF  2
-#define DB_IDX_NOISE_VERIF 3
+
+// db entry
+typedef struct{
+    uint8_t offset[sss_SHARE_LEN];
+    bool valid;     
+} share_offset_entry_t;
+
+// db definition
+typedef struct{
+    share_offset_entry_t entries[MAX_NUM_CLIENTS][MAX_NUM_CLIENTS][DB_IDX_COUNT];
+} server_offset_db_t;
 
 typedef struct server_s server_t;
 typedef void(*srv_state_function_t)(server_t*);
@@ -43,16 +50,15 @@ struct server_s{
 
 void server_setup(server_t *srv, srv_id_t id, io_interface_t io);
 void server_run_state(server_t *srv);
-
 void server_set_ta_sums(server_t* srv, update_t* sum_data, update_t* sum_verif);
 
 // Functions to handle offset DB
-void server_db_store_offset(node_id_t helper_id, node_id_t target_id, int type_index, uint8_t* offset);
+void server_db_store_offset(node_id_t helper_id, node_id_t target_id, share_db_idx_t idx, uint8_t* offset);
 
 void server_db_init();
 
 // To recover offset during recovering phase
-uint8_t* server_db_get_offset(node_id_t helper_id, node_id_t target_id, int type_index);
+uint8_t* server_db_get_offset(node_id_t helper_id, node_id_t target_id, share_db_idx_t idx);
 
 // ------ FSM STATES ------
 void srv_state_wait_updates(server_t* srv);
