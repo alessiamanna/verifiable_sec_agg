@@ -22,7 +22,6 @@ add_executable(protocol
     src/puf_manager.c
 )
 
-# Attempt to find GMP in standard system locations
 find_path(GMP_INCLUDE_DIR NAMES gmp.h PATHS /usr/include /usr/local/include)
 find_library(GMP_LIB NAMES gmp PATHS /usr/lib64 /usr/lib /usr/local/lib)
 
@@ -30,7 +29,6 @@ if(NOT GMP_LIB)
     message(FATAL_ERROR "GMP library not found! Please run: sudo zypper install gmp-devel")
 endif()
 
-# Use the found library in your target
 target_include_directories(protocol PRIVATE ${GMP_INCLUDE_DIR})
 target_link_libraries(protocol PRIVATE 
     "${SSS_DIR}/sss.o"
