@@ -1,5 +1,0 @@
-# ninja log v7
-2	102	1764324268431057726	CMakeFiles/protocol.dir/src/test_puf.c.o	7eebe938bc8d9e9
-35	54	1764414846610309951	protocol	3b0b1e98218ac24b
-0	34	1764414562794311034	CMakeFiles/protocol.dir/src/prot_test.c.o	a9d5c02b41574477
-1	35	1764414846576309951	CMakeFiles/protocol.dir/src/dev_protocol.c.o	52c06da4a3040921
