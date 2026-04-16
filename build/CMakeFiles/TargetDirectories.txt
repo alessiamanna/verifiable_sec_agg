@@ -1,3 +1,0 @@
-/home/alessia/Desktop/tesi/puf_protocol/build/CMakeFiles/protocol.dir
-/home/alessia/Desktop/tesi/puf_protocol/build/CMakeFiles/edit_cache.dir
-/home/alessia/Desktop/tesi/puf_protocol/build/CMakeFiles/rebuild_cache.dir
