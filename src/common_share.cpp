@@ -8,8 +8,11 @@
 #include "sss/sss.h"
 #include "common_share.h"
 #include "crypto_utils.h"
-protocol_key_t get_shared_key(node_id_t helper_node, node_id_t target_node){
-    return (protocol_key_t)helper_node ^ (protocol_key_t)target_node ^ 0xCAFEBABE;
+
+protocol_key_t get_shared_key(node_id_t node_helper, node_id_t node_target) {
+    return UInt128::from_uint32(node_helper) ^ 
+           UInt128::from_uint32(node_target) ^ 
+           UInt128::from_uint32(0xCAFEBABE);
 }
 
 void compute_share_h(puf_resp_t puf_link, protocol_key_t key, uint8_t* out_share) {

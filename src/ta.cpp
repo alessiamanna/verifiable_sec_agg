@@ -21,10 +21,11 @@ static void vector_add(update_t* acc, update_t* input) {
     for(int i=0; i<UPDATE_LEN; i++) acc[i] += input[i];
 }
 
-protocol_key_t simulated_key(node_id_t node_helper, node_id_t node_target){
-    return (protocol_key_t)node_helper ^ (protocol_key_t)node_target ^ 0xCAFEBABE;
+protocol_key_t simulated_key(node_id_t node_helper, node_id_t node_target) {
+    return UInt128::from_uint32(node_helper) ^ 
+           UInt128::from_uint32(node_target) ^ 
+           UInt128::from_uint32(0xCAFEBABE);
 }
-
 static void ta_offset_helper(int N, int K, puf_index_t base_idx, int link_secret_offset, int link_helper_offset, int db_type_idx){
     for(node_id_t target = 0; target < N; target++){
         puf_resp_t secret = get_puf_link_ta(target, base_idx + link_secret_offset);
@@ -46,12 +47,11 @@ static void ta_offset_helper(int N, int K, puf_index_t base_idx, int link_secret
             compute_share_h(puf_h, k, share_h);
 
             uint8_t offset[sss_SHARE_LEN];
-            for(int j = 0; j < sss_SHARE_LEN; j++){
+            for(size_t j = 0; j < sss_SHARE_LEN; j++){
                 offset[j] = real_shares[helper][j] ^ share_h[j];
             }
 
-            server_db_store_offset(helper, target, db_type_idx, offset);
-        }
+            server_db_store_offset(helper, target, static_cast<share_db_idx_t>(db_type_idx), offset);        }
     }
 }
 

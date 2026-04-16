@@ -5,7 +5,7 @@
 
 #include "common.h"
 #include "puf_data.h"
-#include "puf_utils.h"
+
 #include "sss/sss.h"
 
 

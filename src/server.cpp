@@ -146,9 +146,8 @@ printf("\n");
 
 static void accumulate_share(recon_ctx_t* ctx, node_id_t helper, node_id_t target, int db_idx, uint8_t* raw_share){
     if(ctx->done || ctx->count >= MAX_NUM_CLIENTS) return;
-    uint8_t* off = server_db_get_offset(helper, target, db_idx);
-    if(!off) return;
-    for(int j = 0; j < sss_SHARE_LEN; j++){
+    uint8_t* off = server_db_get_offset(helper, target, static_cast<share_db_idx_t>(db_idx));    if(!off) return;
+    for(size_t j = 0; j < sss_SHARE_LEN; j++){
         ctx->share[ctx->count][j] = raw_share[j] ^ off[j];
     }
     ctx->count++;
@@ -291,7 +290,7 @@ void srv_state_req_shares(server_t* srv){
     // Compute HMAC
     transport_chain_t srv_chain;
     get_transport_chain(srv->current_link_srv, &srv_chain);
-    sign_node_set(&srv_drop_msg.n_3, srv_chain.l_3_hmac_drop, srv_drop_msg.n_4);
+    sign_node_set(&srv->Z_set, srv_chain.l_3_hmac_drop, srv_drop_msg.n_4);
 
     srv->io.send(srv->io.obj, (uint8_t*)&srv_drop_msg, sizeof(srv_drop_msg));
 
@@ -330,7 +329,7 @@ void srv_state_wait_recovery(server_t* srv){
 
 
     // For each share in the received message, check if it belongs to a dropout node or not.
-    for(int i = 0; i < share_msg.item_cnt; i++){
+    for(share_cnt_t i = 0; i < share_msg.item_cnt; i++){
         
         share_item_t* item = &share_msg.items[i]; // Share data
         node_id_t helper = share_msg.node_id;  

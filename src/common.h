@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include "int128.h"
 
 #define DEBUG 1
 #define MAX_NUM_CLIENTS 4 //for now let's consider node A-B-C-D
@@ -45,7 +46,7 @@
 #define SHA256_DIGEST 32
 
 // Define 128bit data type. Requires C23.
-typedef unsigned _BitInt(128) uint128_t;
+typedef UInt128 uint128_t;
 
 // define puf response
 typedef uint128_t puf_resp_t;

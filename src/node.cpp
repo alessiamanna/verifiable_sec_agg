@@ -67,12 +67,11 @@ void node_state_compute_update(node_t *node){
     }
     
     //treated like 128bit values for encryption operation 
-    payload_t y_j;
-    payload_t y_j_hat;
-
+    payload_t y_j = UInt128::from_update(temp_update);
+    payload_t y_j_hat = UInt128::from_update(temp_verif);
     //copy the values of 16bit * n components updates
-    memcpy(&y_j, temp_update, sizeof(y_j));
-    memcpy(&y_j_hat, temp_verif, sizeof(y_j_hat));
+    //memcpy(&y_j, temp_update, sizeof(y_j));
+    //memcpy(&y_j_hat, temp_verif, sizeof(y_j_hat));
 
     //packet construction
     local_update_msg.n_0 = encrypt_puf(y_j, srv_chain.l_0_data);
@@ -123,8 +122,8 @@ void node_state_wait_for_server(node_t *node){
     #endif
 
     hmac_t calc_hmac;
-    sign_node_set(&srv_dropout_msg.n_3, srv_chain.l_3_hmac_drop, calc_hmac);
-    
+    node_set_t local_z_set = srv_dropout_msg.n_3;
+    sign_node_set(&local_z_set, srv_chain.l_3_hmac_drop, calc_hmac);    
     if(!verify_hmac(calc_hmac, srv_dropout_msg.n_4)){
         printf("[NODE %d] HMAC mismatch on dropout list!\n", node->node_id);
         return;

@@ -2,20 +2,21 @@
 #define PUF_UTILS_H
 
 #include "common.h"
+#include "int128.h"
 #include "puf_data.h"
 
 
 // function to retrieve puf response
 static inline puf_resp_t get_puf_link_ta(node_id_t node_id, puf_index_t index){
     if(node_id >= MAX_NUM_CLIENTS || index >= CHAIN_LEN)
-        return 0;
+        return UInt128{0,0,0,0,};
     return PUF_CHAIN_TA[node_id][index];
 }
 
 static inline puf_resp_t get_puf_link_srv(puf_index_t index)
 {
     if(index >= CHAIN_LEN){
-        return 0;
+        return UInt128{0,0,0,0,};
     }
     return PUF_CHAIN_SRV[index];
 }
