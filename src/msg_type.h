@@ -69,7 +69,7 @@ typedef struct __attribute__((packed)) srv_dropout_list_s{
 typedef struct __attribute__((packed)) srv_global_update_s{
     msg_type type;
     srv_id_t srv_id;
-
+    uint32_t num_participants;
     update_t n_7[UPDATE_LEN];
     update_t n_8[UPDATE_LEN];
     hmac_t n_9;

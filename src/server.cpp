@@ -403,7 +403,7 @@ void srv_state_compute_global(server_t* srv){
     srv_global_update_t msg;
     msg.type = MSG_SRV_SEND_GLOBAL_UPDATE;
     msg.srv_id = srv->srv_id;
-    
+    msg.num_participants = srv->J_prime_set.node_count;
     // Subtract masks and noise. 
     update_t final_sum_vec[UPDATE_LEN];
     // For verification

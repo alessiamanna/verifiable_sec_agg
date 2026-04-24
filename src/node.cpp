@@ -220,7 +220,7 @@ void node_state_wait_final(node_t *node){
     }
 
     // Check verifiability
-    int N_participants = 3;
+    uint32_t N_participants = final_msg.num_participants;
 
     printf("[NODE %d DEBUG] Decrypted Values (First 3):\n", node->node_id);
     printf("   -> Sum Data:  %u, %u, %u ...\n", clean_sum[0].data[0], clean_sum[1].data[0], clean_sum[2].data[0]);
