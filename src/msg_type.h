@@ -28,8 +28,8 @@ typedef struct __attribute__((packed)) node_local_update_s{
     msg_type type;
     node_id_t node_id;
     
-    payload_t n_0;
-    payload_t n_1;
+    update_t n_0[UPDATE_LEN];
+    update_t n_1[UPDATE_LEN];
     hmac_t n_2;
 
 }node_local_update_t;
@@ -70,8 +70,8 @@ typedef struct __attribute__((packed)) srv_global_update_s{
     msg_type type;
     srv_id_t srv_id;
 
-    payload_t n_7;
-    payload_t n_8;
+    update_t n_7[UPDATE_LEN];
+    update_t n_8[UPDATE_LEN];
     hmac_t n_9;
 } srv_global_update_t;
 
@@ -81,8 +81,8 @@ typedef struct __attribute__((packed)) srv_global_update_s{
 typedef struct __attribute__((packed)) ta_mask_setup_s{
     msg_type type;
 
-    payload_t global_mask_sum;
-    payload_t global_mask_verif;
+    update_t global_mask_sum[UPDATE_LEN];
+    update_t global_mask_verif[UPDATE_LEN];
 } ta_mask_setup_t;
 
 #endif

@@ -5,6 +5,7 @@
 #include "node.h"
 #include "common.h"
 #include "common_share.h"
+#include "int128.h"
 #include "msg_type.h"
 #include "puf_data.h"
 #include "puf_utils.h"
@@ -49,35 +50,43 @@ void node_state_compute_update(node_t *node){
     transport_chain_t srv_chain;
     get_transport_chain(node->current_link_srv, &srv_chain);
 
-    //pointers to mask, so they are treated like 16bits * N components arrays like the model update
-    uint16_t* p_d_i = (uint16_t*)&ta_chains.mask_chain.d_mask_data;
-    uint16_t* p_d_i_1 = (uint16_t*)&ta_chains.mask_chain.d_noise_data;
-    uint16_t* p_d_i_2 = (uint16_t*)&ta_chains.mask_chain.d_mask_verif;
-    uint16_t* p_d_i_3 = (uint16_t*)&ta_chains.mask_chain.d_noise_verif;
+    puf_resp_t p_j[UPDATE_LEN];
+    get_device_specific_key(node->node_id, p_j);
+   
+    update_t mask_data[UPDATE_LEN];
+    update_t noise_data[UPDATE_LEN];
+    update_t mask_verif[UPDATE_LEN];
+    update_t noise_verif[UPDATE_LEN];
+
+    expand_puf_response(ta_chains.mask_chain.d_mask_data, p_j, mask_data);
+    expand_puf_response(ta_chains.mask_chain.d_noise_data, p_j, noise_data);
+    expand_puf_response(ta_chains.mask_chain.d_mask_verif, p_j, mask_verif);
+    expand_puf_response(ta_chains.mask_chain.d_noise_verif, p_j, noise_verif);
 
     update_t temp_update[UPDATE_LEN];
     update_t temp_verif[UPDATE_LEN];
 
     for(int i = 0; i < UPDATE_LEN; i++){
         update_t x = node->data_update[i];
-        update_t x_verify = (x * VERIF_A) + VERIF_B;
+        update_t x_verify = (x * VERIF_A) + UInt128::from_uint32(VERIF_B);
         
-        temp_update[i] = x + p_d_i[i] + p_d_i_1[i];
-        temp_verif[i] = x_verify + p_d_i_2[i] + p_d_i_3[i];
+        temp_update[i] = x + mask_data[i] + noise_data[i];
+        temp_verif[i] = x_verify + mask_verif[i] + noise_verif[i];
     }
     
     //treated like 128bit values for encryption operation 
-    payload_t y_j = UInt128::from_update(temp_update);
-    payload_t y_j_hat = UInt128::from_update(temp_verif);
+    
     //copy the values of 16bit * n components updates
     //memcpy(&y_j, temp_update, sizeof(y_j));
     //memcpy(&y_j_hat, temp_verif, sizeof(y_j_hat));
 
     //packet construction
-    local_update_msg.n_0 = encrypt_puf(y_j, srv_chain.l_0_data);
-    local_update_msg.n_1 = encrypt_puf(y_j_hat, srv_chain.l_1_verif);
+    for(int i = 0; i < UPDATE_LEN; i++){
+        local_update_msg.n_0[i] = encrypt_puf(temp_update[i], srv_chain.l_0_data);
+        local_update_msg.n_1[i] = encrypt_puf(temp_verif[i], srv_chain.l_1_verif);
+    }
 
-    sign_payload(y_j, y_j_hat, srv_chain.l_2_hmac_local, local_update_msg.n_2);
+    sign_payload(temp_update, temp_verif, srv_chain.l_2_hmac_local, local_update_msg.n_2);
 
     if(node->io.send(node->io.obj, (uint8_t*)&local_update_msg, sizeof(local_update_msg)) == OK){
         #if DEBUG
@@ -154,16 +163,16 @@ void node_state_wait_for_server(node_t *node){
             //implementa la logica di recupero delle share.
             item_data->type = SHARE_TYPE_MASK;
 
-            compute_share_h(ta_chains.share_chain.share_mask,       shared_key, item_data->share_data);
-            compute_share_h(ta_chains.share_chain.share_mask_verif, shared_key, item_data->share_verif);
+            compute_share_h(ta_chains.share_chain.share_mask,       shared_key, (uint8_t*)item_data->share_data, UPDATE_LEN*sss_SHARE_LEN);
+            compute_share_h(ta_chains.share_chain.share_mask_verif, shared_key, (uint8_t*)item_data->share_verif, UPDATE_LEN*sss_SHARE_LEN);
         }
         else{
             // Otherwise, we only have to recover the shares to remove the noise.
             item_data->type = SHARE_TYPE_NOISE;
             //implementa la logica di recupero delle share.
             printf("I'm here\n");
-            compute_share_h(ta_chains.share_chain.share_noise,       shared_key, item_data->share_data);
-            compute_share_h(ta_chains.share_chain.share_noise_verif, shared_key, item_data->share_verif);
+            compute_share_h(ta_chains.share_chain.share_noise,       shared_key, (uint8_t*)item_data->share_data, UPDATE_LEN*sss_SHARE_LEN);
+            compute_share_h(ta_chains.share_chain.share_noise_verif, shared_key, (uint8_t*)item_data->share_verif, UPDATE_LEN*sss_SHARE_LEN);
 
         }
         share_rec_msg.item_cnt++;
@@ -194,10 +203,14 @@ void node_state_wait_final(node_t *node){
         return;
     }
 
-    // decrypt
-    payload_t clean_sum = decrypt_puf(final_msg.n_7, srv_chain.l_5_final_data);
-    payload_t clean_verif = decrypt_puf(final_msg.n_8, srv_chain.l_6_final_verif);
+    update_t clean_sum[UPDATE_LEN];
+    update_t clean_verif[UPDATE_LEN];
 
+    // decrypt
+    for(int i = 0; i < UPDATE_LEN; i++){
+        clean_sum[i] = decrypt_puf(final_msg.n_7[i], srv_chain.l_5_final_data);
+        clean_verif[i] = decrypt_puf(final_msg.n_8[i], srv_chain.l_6_final_verif);
+    }
     hmac_t calc_hmac;
     sign_payload(final_msg.n_7, final_msg.n_8, srv_chain.l_7_global, calc_hmac);
 
@@ -207,31 +220,26 @@ void node_state_wait_final(node_t *node){
     }
 
     // Check verifiability
-
-    update_t* p_sum = (update_t*)&clean_sum;
-
-    update_t* p_verif = (update_t*)&clean_verif;
-
     int N_participants = 3;
 
     printf("[NODE %d DEBUG] Decrypted Values (First 3):\n", node->node_id);
-    printf("   -> Sum Data:  %u, %u, %u ...\n", p_sum[0], p_sum[1], p_sum[2]);
-    printf("   -> Sum Verif: %u, %u, %u ...\n", p_verif[0], p_verif[1], p_verif[2]);
+    printf("   -> Sum Data:  %u, %u, %u ...\n", clean_sum[0].data[0], clean_sum[1].data[0], clean_sum[2].data[0]);
+    printf("   -> Sum Verif: %u, %u, %u ...\n", clean_verif[0].data[0], clean_verif[1].data[0], clean_verif[2].data[0]);
     
     int errors = 0;
     for(int i = 0; i < UPDATE_LEN; i++){
-        update_t expected_verif = (p_sum[i] * VERIF_A) + N_participants*VERIF_B;
+        update_t expected_verif = (clean_sum[i] * VERIF_A) + UInt128::from_uint32(N_participants*VERIF_B);
         
-        if(p_verif[i] != expected_verif){
+        if(!(clean_verif[i] == expected_verif)){
             errors++;
             #if DEBUG
             printf("[NODE %d] Math mismatch at idx %d\n", node->node_id, i);
             #endif
 
             printf("[NODE %d ERROR] Math Mismatch at index %d:\n", node->node_id, i);
-                printf("   -> Data: %u\n", p_sum[i]);
-                printf("   -> Expected Verif (Data*A+B): %u\n", expected_verif);
-                printf("   -> Actual Verif (Received):   %u\n", p_verif[i]);
+                printf("   -> Data: %u\n", clean_sum[i].data[0]);
+                printf("   -> Expected Verif (Data*A+B): %u\n", expected_verif.data[0]);
+                printf("   -> Actual Verif (Received):   %u\n", clean_verif[i].data[0]);
         }
     }
 
@@ -248,7 +256,7 @@ void node_state_wait_final(node_t *node){
     #endif
 
    
-    memcpy(node->data_update, p_sum, sizeof(node->data_update));
+    memcpy(node->data_update, clean_sum, sizeof(node->data_update));
 
     // Update links for next iteration
     node->current_link_ta += MASK_CHAIN_LEN + SHARE_CHAIN_LEN;

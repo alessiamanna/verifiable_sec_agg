@@ -31,6 +31,18 @@ static inline payload_t decrypt_puf(payload_t enc_value, puf_resp_t puf_link){
     return enc_value ^ puf_link;
 }
 
+// obtain the device specific key 
+static inline void get_device_specific_key(node_id_t node_id, puf_resp_t* out_p){
+    for(int m = 0; m < UPDATE_LEN; m++){
+        out_p[m] = UInt128::from_uint32(0x8BADF00D ^ node_id ^ m);
+    }
+}
+
+static inline void expand_puf_response(puf_resp_t scalar_puf, const puf_resp_t* device_secret, update_t* expanded_response){
+    for(int m = 0; m < UPDATE_LEN; m++){
+        expanded_response[m] = scalar_puf ^ device_secret[m];
+    }
+}
 
 
 #endif

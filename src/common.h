@@ -15,7 +15,7 @@
 #define VERIF_A 3
 #define VERIF_B 5
 
-#define UPDATE_LEN 8 // for now let's assume 128bit update, 16 bit x 8 components.
+#define UPDATE_LEN 16 // for now let's assume 128bit update, 16 bit x 8 components.
 
 #define LINK_MASK_DATA 0
 #define LINK_NOISE_DATA 1
@@ -55,7 +55,9 @@ typedef uint128_t puf_resp_t;
 typedef uint8_t puf_index_t;
 
 typedef uint128_t payload_t;
-typedef uint16_t update_t;
+
+//each component should have the same size of the puf response (128bit)
+typedef uint128_t update_t;
 typedef uint128_t protocol_key_t; 
 
 typedef uint16_t node_id_t;

@@ -37,7 +37,7 @@ typedef struct{
 // Utility to print, remove later
 static void print_vec_head(const char* label, update_t* vec) {
     #if DEBUG
-    printf("   [%s] First element: %u\n", label, (uint32_t)vec[0]); 
+    printf("   [%s] First element: %u\n", label, vec[0].data[0]); 
     #endif
 }
 
@@ -71,8 +71,8 @@ void server_db_init(){
 }
 
 // Store offsets
-void server_db_store_offset(node_id_t helper, node_id_t target, share_db_idx_t idx, uint8_t* offset) {
-    if (helper >= MAX_NUM_CLIENTS || target >= MAX_NUM_CLIENTS || idx >= DB_IDX_COUNT) {
+void server_db_store_offset(node_id_t helper, node_id_t target, share_db_idx_t idx, uint8_t offset[UPDATE_LEN][sss_SHARE_LEN]) {
+    if (helper >= MAX_NUM_CLIENTS || target >= MAX_NUM_CLIENTS  || idx >= DB_IDX_COUNT) {
         #if DEBUG
             printf("[SERVER DB] Error Store: Node ID out of bounds (H:%d, T:%d)\n", helper, target);
         #endif
@@ -80,20 +80,21 @@ void server_db_store_offset(node_id_t helper, node_id_t target, share_db_idx_t i
     }
 
     share_offset_entry_t* e = &offset_db.entries[helper][target][idx];
-    memcpy(e->offset, offset, sss_SHARE_LEN);
+
+    memcpy(e->offset, offset, UPDATE_LEN * sss_SHARE_LEN);
     e->valid = true;
 }
 
+
 // Function to retrieve offset value
 uint8_t* server_db_get_offset(node_id_t helper, node_id_t target, share_db_idx_t idx) {
-    
     if (helper >= MAX_NUM_CLIENTS || target >= MAX_NUM_CLIENTS || idx >= DB_IDX_COUNT) {
         return NULL; 
     }
     share_offset_entry_t* e = &offset_db.entries[helper][target][idx];
     
     if(e->valid){
-        return e->offset;
+        return (uint8_t*)e->offset;
     }
     return NULL;
 }
@@ -144,23 +145,41 @@ printf("\n");
     return true;
 }
 
-static void accumulate_share(recon_ctx_t* ctx, node_id_t helper, node_id_t target, int db_idx, uint8_t* raw_share){
+
+static void accumulate_share(recon_ctx_t* ctx, node_id_t helper, node_id_t target, int db_idx, uint8_t raw_share[UPDATE_LEN][sss_SHARE_LEN]){
     if(ctx->done || ctx->count >= MAX_NUM_CLIENTS) return;
-    uint8_t* off = server_db_get_offset(helper, target, static_cast<share_db_idx_t>(db_idx));    if(!off) return;
-    for(size_t j = 0; j < sss_SHARE_LEN; j++){
-        ctx->share[ctx->count][j] = raw_share[j] ^ off[j];
+    
+    uint8_t* off_ptr = server_db_get_offset(helper, target, static_cast<share_db_idx_t>(db_idx));    
+    if(!off_ptr) return;
+    
+    uint8_t (*off)[sss_SHARE_LEN] = (uint8_t (*)[sss_SHARE_LEN])off_ptr;
+
+    for(int m = 0; m < UPDATE_LEN; m++) {
+        for(size_t j = 0; j < sss_SHARE_LEN; j++){
+            ctx->share[m][ctx->count][j] = raw_share[m][j] ^ off[m][j];
+        }
     }
     ctx->count++;
 }
 
 static void try_reconstruction(recon_ctx_t* ctx, update_t* buffer_acc){
     if(ctx->done || ctx->count < K) return;
-    uint8_t secret_buff[sss_MLEN];
-    if(sss_combine_shares(secret_buff, ctx->share, K) == 0){
-        puf_resp_t val;
-        memcpy(&val, secret_buff, sizeof(val));
-        vector_add(buffer_acc, (update_t*)&val);
-        ctx->done = true; // if threshold shares have been reached, mark as done
+    
+    update_t recovered_vector[UPDATE_LEN];
+    int success_count = 0;
+
+    for(int m = 0; m < UPDATE_LEN; m++) {
+        uint8_t secret_buff[sss_MLEN];
+        if(sss_combine_shares(secret_buff, ctx->share[m], K) == 0){
+            memcpy(&recovered_vector[m], secret_buff, sizeof(update_t));
+            success_count++;
+        }
+    }
+
+    // Only commit if all components of the vector reconstructed successfully
+    if(success_count == UPDATE_LEN) {
+        vector_add(buffer_acc, recovered_vector);
+        ctx->done = true; 
     }
 }
 
@@ -241,9 +260,13 @@ void srv_state_wait_updates(server_t* srv){
     transport_chain_t srv_chain;
     get_transport_chain(srv->current_link_srv, &srv_chain);
 
-    payload_t y_clean = decrypt_puf(rcv_msg.n_0, srv_chain.l_0_data);
-    payload_t y_hat_clean = decrypt_puf(rcv_msg.n_1, srv_chain.l_1_verif);
+    update_t y_clean[UPDATE_LEN];
+    update_t y_hat_clean[UPDATE_LEN];
 
+    for(int i = 0; i < UPDATE_LEN; i++){
+     y_clean[i] = decrypt_puf(rcv_msg.n_0[i], srv_chain.l_0_data);
+     y_hat_clean[i] = decrypt_puf(rcv_msg.n_1[i], srv_chain.l_1_verif);
+    }
  
     hmac_t calc_hmac;
     sign_payload(y_clean, y_hat_clean, srv_chain.l_2_hmac_local, calc_hmac);
@@ -258,8 +281,8 @@ void srv_state_wait_updates(server_t* srv){
     #endif
 
     // Aggregate partial sum 
-    vector_add(srv->aggr_sum, (update_t*)&y_clean);
-    vector_add(srv->aggr_verif, (update_t*)&y_hat_clean);
+    vector_add(srv->aggr_sum, y_clean);
+    vector_add(srv->aggr_verif, y_hat_clean);
     // Add node to set J of participating nodes 
     node_set_add(&srv->J_prime_set, rcv_msg.node_id);
 
@@ -389,15 +412,13 @@ void srv_state_compute_global(server_t* srv){
     compute_global_result(final_sum_vec, srv->aggr_sum, srv->ta_mask_x, srv->dropped_mask_x, srv->active_noise_x);
     compute_global_result(final_verif_vec, srv->aggr_verif, srv->ta_mask_hat, srv->droppes_mask_hat, srv->active_noise_hat);
 
-    payload_t payload_sum, payload_verif;
-    memcpy(&payload_sum, final_sum_vec, sizeof(payload_t));
-    memcpy(&payload_verif, final_verif_vec, sizeof(payload_t));
-
     transport_chain_t srv_chain;
     get_transport_chain(srv->current_link_srv, &srv_chain);
     // Encrpyt global sum and global sum verif to broadcast to nodes
-    msg.n_7 = encrypt_puf(payload_sum, srv_chain.l_5_final_data);
-    msg.n_8 = encrypt_puf(payload_verif, srv_chain.l_6_final_verif);
+    for(int i = 0; i < UPDATE_LEN; i++){
+    msg.n_7[i] = encrypt_puf(final_sum_vec[i], srv_chain.l_5_final_data);
+    msg.n_8[i] = encrypt_puf(final_verif_vec[i], srv_chain.l_6_final_verif);
+    }
    
     sign_payload(msg.n_7, msg.n_8, srv_chain.l_7_global, msg.n_9);
     srv->io.send(srv->io.obj, (uint8_t*)&msg, sizeof(msg));

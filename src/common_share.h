@@ -35,8 +35,8 @@ typedef struct __attribute__((packed)){
     node_id_t target_node_id; 
     share_type_t type;
 
-    share_val_t share_data[sss_SHARE_LEN];
-    share_val_t share_verif[sss_SHARE_LEN];
+    share_val_t share_data[UPDATE_LEN][sss_SHARE_LEN];
+    share_val_t share_verif[UPDATE_LEN][sss_SHARE_LEN];
 
 } share_item_t;
 
@@ -56,7 +56,7 @@ typedef node_set_t dropout_req_set_t;
 
 // To keep track of already recovered shares
 typedef struct{
-    sss_Share share[MAX_NUM_CLIENTS];
+    sss_Share share[UPDATE_LEN][MAX_NUM_CLIENTS];
     int count;
     bool done;
 } recon_ctx_t;
@@ -95,6 +95,6 @@ static inline bool node_is_dropout(const node_set_t* J, const node_set_t* J_prim
 
 
 protocol_key_t get_shared_key(node_id_t helper_node, node_id_t target_node);
-void compute_share_h(puf_resp_t puf_link, protocol_key_t key, uint8_t* share_out);
+void compute_share_h(puf_resp_t puf_link, protocol_key_t key, uint8_t* share_out, size_t out_len);
 
 #endif

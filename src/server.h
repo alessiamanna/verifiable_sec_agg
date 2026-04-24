@@ -10,7 +10,7 @@
 
 // db entry
 typedef struct{
-    uint8_t offset[sss_SHARE_LEN];
+    uint8_t offset[UPDATE_LEN][sss_SHARE_LEN];
     bool valid;     
 } share_offset_entry_t;
 
@@ -53,7 +53,7 @@ void server_run_state(server_t *srv);
 void server_set_ta_sums(server_t* srv, update_t* sum_data, update_t* sum_verif);
 
 // Functions to handle offset DB
-void server_db_store_offset(node_id_t helper_id, node_id_t target_id, share_db_idx_t idx, uint8_t* offset);
+void server_db_store_offset(node_id_t helper_id, node_id_t target_id, share_db_idx_t idx, uint8_t offset[UPDATE_LEN][sss_SHARE_LEN]);
 
 void server_db_init();
 
