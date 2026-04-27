@@ -28,6 +28,9 @@ struct server_s{
 
     puf_index_t current_link_srv;
 
+    update_t clear_res[UPDATE_LEN];
+    uint32_t iterations_count; // trials counter
+
     node_set_t J_set;
     node_set_t J_prime_set;
     node_set_t Z_set; //dropouts

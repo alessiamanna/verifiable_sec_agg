@@ -106,6 +106,13 @@ static bool dropout_recovered(server_t* srv){
             return false;
         }
     }
+
+    for(int i=0; i<srv->Z_set.node_count; i++) {
+        node_id_t a_id = srv->J_prime_set.node_id[i];
+        if (!ctx_noise[a_id].done || !ctx_noise_verif[a_id].done) {
+            return false;
+        }
+    }
     return true;
 }
 
@@ -249,11 +256,20 @@ void srv_state_wait_updates(server_t* srv){
     memset(&rcv_msg, 0, sizeof(node_local_update_t));
     size_t out_len = 0;
 
-    if(srv->io.recv(srv->io.obj,(uint8_t*)&rcv_msg, sizeof(node_local_update_t), &out_len) != OK){
-        #if DEBUG
-        printf("[SERVER] Error in receiving update\n");
-        #endif
+    if(srv->io.recv(srv->io.obj,(uint8_t*)&rcv_msg, sizeof(node_local_update_t), &out_len) != OK || out_len == 0){
+        srv->iterations_count++;
+
+        if(srv->iterations_count > 5 && srv->J_prime_set.node_count >= 2){
+            #if DEBUG
+            printf("[SERVER] Timeout, received from %d nodes, starting recovery phase\n", srv->J_prime_set.node_count);
+            #endif
+            srv->iterations_count = 0;
+            srv->current_state = srv_state_req_shares;
+        }
+        return;
     }
+
+    srv->iterations_count = 0;
 
     if(node_is_present(&srv->J_prime_set, rcv_msg.node_id)) return; //skip it if already present in this round, means the node sent the update twice in the same round
 
@@ -404,20 +420,19 @@ void srv_state_compute_global(server_t* srv){
     msg.type = MSG_SRV_SEND_GLOBAL_UPDATE;
     msg.srv_id = srv->srv_id;
     msg.num_participants = srv->J_prime_set.node_count;
-    // Subtract masks and noise. 
-    update_t final_sum_vec[UPDATE_LEN];
+
+    compute_global_result(srv->clear_res, srv->aggr_sum, srv->ta_mask_x, srv->dropped_mask_x, srv->active_noise_x);
+   
     // For verification
     update_t final_verif_vec[UPDATE_LEN];
-    
-    compute_global_result(final_sum_vec, srv->aggr_sum, srv->ta_mask_x, srv->dropped_mask_x, srv->active_noise_x);
     compute_global_result(final_verif_vec, srv->aggr_verif, srv->ta_mask_hat, srv->droppes_mask_hat, srv->active_noise_hat);
 
     transport_chain_t srv_chain;
     get_transport_chain(srv->current_link_srv, &srv_chain);
     // Encrpyt global sum and global sum verif to broadcast to nodes
     for(int i = 0; i < UPDATE_LEN; i++){
-    msg.n_7[i] = encrypt_puf(final_sum_vec[i], srv_chain.l_5_final_data);
-    msg.n_8[i] = encrypt_puf(final_verif_vec[i], srv_chain.l_6_final_verif);
+        msg.n_7[i] = encrypt_puf(srv->clear_res[i], srv_chain.l_5_final_data);
+        msg.n_8[i] = encrypt_puf(final_verif_vec[i], srv_chain.l_6_final_verif);
     }
    
     sign_payload(msg.n_7, msg.n_8, srv_chain.l_7_global, msg.n_9);
