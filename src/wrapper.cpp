@@ -1,109 +1,88 @@
 #include <pybind11/pybind11.h>
-#include <pybind11/stl.h>
 #include <pybind11/numpy.h>
-#include <vector>
-
-#include "node.h"
-#include "server.h"
-#include "ta.h"
-#include "msg_type.h"
+#include <pybind11/stl.h>
+#include "heversa_api.h"
 
 namespace py = pybind11;
-using namespace pybind11::literals;
 
-struct PyIOHandler {
-    py::object send_cb;
-    py::object recv_cb;
-    PyIOHandler(py::object s, py::object r) : send_cb(s), recv_cb(r) {}
-};
-
-prot_ret_t py_send_wrapper(void* obj, const uint8_t* data, size_t len) {
-    auto* handler = static_cast<PyIOHandler*>(obj);
-    try {
-        py::gil_scoped_acquire acquire;
-        handler->send_cb(py::bytes((const char*)data, len));
-        return OK;
-    } catch (py::error_already_set &e) {
-        return ERROR;
+node_local_update_t py_client_mask_update(node_t& node, py::array_t<uint32_t> weights) {
+    py::buffer_info buf = weights.request();
+    
+    if (buf.size != UPDATE_LEN) {
+        throw std::runtime_error("Weights array must have exactly UPDATE_LEN elements.");
     }
+    
+    uint32_t* ptr = static_cast<uint32_t*>(buf.ptr);
+    node_local_update_t out_msg;
+    
+    client_mask_update(&node, ptr, &out_msg);
+    return out_msg;
 }
 
-prot_ret_t py_recv_wrapper(void* obj, uint8_t* buff, size_t max_len, size_t* out_len) {
-    auto* handler = static_cast<PyIOHandler*>(obj);
-    try {
-        py::gil_scoped_acquire acquire;
-        py::bytes result = handler->recv_cb(max_len);
-        std::string s = result;
-        
-        if (s.length() > max_len) return ERROR;
-        memcpy(buff, s.data(), s.length());
-        *out_len = s.length();
-        return OK;
-    } catch (py::error_already_set &e) {
-        return ERROR;
-    }
+py::array_t<uint32_t> py_server_aggregate_updates(server_t& srv) {
+    auto result = py::array_t<uint32_t>(UPDATE_LEN);
+    py::buffer_info buf = result.request();
+    
+    uint32_t* ptr = static_cast<uint32_t*>(buf.ptr);
+    
+    server_aggregate_updates(&srv, ptr);
+    return result;
 }
 
 PYBIND11_MODULE(heversa, m) {
-    m.doc() = "HeVerSa Secure Aggregation Protocol Bindings";
-
-    py::class_<PyIOHandler>(m, "IOHandler")
-        .def(py::init<py::object, py::object>());
-
-    m.def("ta_setup_round", &ta_compute_offset, "N"_a, "K"_a, "base_idx"_a);
-    m.def("ta_get_global_masks", [](server_t& srv, int N, uint32_t idx) {
-        ta_send_global_masks(&srv, N, (puf_index_t)idx);
-    });
-
-    py::class_<node_t>(m, "Node")
-        .def(py::init([](int id, py::object send_fn, py::object recv_fn) {
-            auto* handler = new PyIOHandler(send_fn, recv_fn);
-            node_t* n = new node_t();
-            io_interface_t io = {handler, py_send_wrapper, py_recv_wrapper};
-            node_setup(n, id, io);
-            return n;
-        }))
-
-        .def("add_to_kj", [](node_t& n, int target_id) {
-            node_set_add(&n.K_j, (node_id_t)target_id);
-        })
-        .def("set_input", [](node_t& n, py::array_t<uint32_t> weights) {
-            auto r = weights.unchecked<1>();
-            for(size_t i=0; i<UPDATE_LEN && i<r.shape(0); ++i) {
-                n.data_update[i] = UInt128::from_uint32(r(i)); 
-            }
-        })
-        .def("run_state", [](node_t& n) {
-            run_node_state(&n);
-        })
-        .def_readonly("node_id", &node_t::node_id);
+    m.doc() = "Python bindings for the HeVerSa secure aggregation protocol";
 
     py::class_<server_t>(m, "Server")
-        .def(py::init([](int id, py::object send_fn, py::object recv_fn) {
-            auto* handler = new PyIOHandler(send_fn, recv_fn);
-            server_t* s = new server_t();
-            io_interface_t io = {handler, py_send_wrapper, py_recv_wrapper};
-            server_setup(s, id, io);
-            return s;
-        }))
-        .def("run_state", &server_run_state)
-        .def_static("db_init", &server_db_init)
-        .def("get_result", [](server_t& s) {
-            py::array_t<uint32_t> result(UPDATE_LEN);
-            auto r = result.mutable_unchecked<1>();
-            for (int i = 0; i < UPDATE_LEN; i++) {
-                uint32_t val = 0;
-                std::memcpy(&val, &s.clear_res[i], sizeof(uint32_t));
-                r(i) = val;
-            }
-            return result;
-        })
+        .def(py::init<>());
         
-        .def_property_readonly("current_state_name", [](const server_t& s) {
-            if (s.current_state == srv_state_wait_updates) return "WAIT_UPDATES";
-            if (s.current_state == srv_state_req_shares) return "REQ_SHARES";
-            if (s.current_state == srv_state_wait_recovery) return "WAIT_RECOVERY";
-            if (s.current_state == srv_state_compute_global) return "COMPUTE_GLOBAL";
-            return "UNKNOWN";
-        });
+    py::class_<node_t>(m, "Node")
+        .def(py::init<>());
+
+    py::class_<node_local_update_t>(m, "NodeLocalUpdate")
+        .def(py::init<>());
+        
+    py::class_<srv_dropout_list_t>(m, "SrvDropoutList")
+        .def(py::init<>());
+        
+    py::class_<node_shares_msg_t>(m, "NodeSharesMsg")
+        .def(py::init<>())
+        .def_readonly("item_cnt", &node_shares_msg_t::item_cnt); 
+
+    py::class_<node_set_t>(m, "NodeSet")
+        .def(py::init<>())
+        .def_readonly("node_count", &node_set_t::node_count);
+
+    m.def("ta_setup_protocol", [](int num_clients, int threshold, server_t& srv) {
+        ta_setup_protocol(num_clients, threshold, &srv);
+    }, "Setup the TA and Server");
+
+    m.def("client_setup", [](node_t& node, int id) {
+        client_setup(&node, id);
+    }, "Setup a Client Node");
+
+    m.def("client_mask_update", &py_client_mask_update, "Generate an obfuscated update from numpy weights");
+
+    m.def("server_receive_update", [](server_t& srv, node_local_update_t& msg) {
+        server_receive_update(&srv, &msg);
+    }, "Feed an update into the server");
+
+
+    m.def("server_broadcast_dropouts", [](server_t& srv) {
+        srv_dropout_list_t drop_msg;
+        node_set_t dropouts;
+        server_broadcast_dropouts(&srv, &drop_msg, &dropouts);
+        return py::make_tuple(drop_msg, dropouts);
+    }, "Get the signed dropout list and plaintext dropout set from the server");
+
+    m.def("client_compute_shares", [](node_t& node, srv_dropout_list_t& in_drop_msg) {
+        node_shares_msg_t out_msg;
+        client_compute_shares(&node, &in_drop_msg, &out_msg);
+        return out_msg;
+    }, "Client computes recovery shares based on the server's dropout list");
+
+    m.def("server_receive_shares", [](server_t& srv, node_shares_msg_t& msg) {
+        server_receive_shares(&srv, &msg);
+    }, "Feed recovery shares to the server");
+
+    m.def("server_aggregate_updates", &py_server_aggregate_updates, "Finalize the round and return the cleartext NumPy array");
 }

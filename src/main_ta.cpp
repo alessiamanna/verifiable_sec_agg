@@ -1,136 +1,97 @@
 #include <stdio.h>
 #include <string.h>
-#include "common.h"
-#include "node.h"
-#include "server.h"
-#include "ta.h"
+#include "heversa_api.h"
 
-// --- MOCK NETWORK BUFFERS ---
-// Increased to 64KB to handle the larger 2D SSS array messages
-uint8_t server_inbox[MAX_NUM_CLIENTS][65536]; 
-size_t server_inbox_len[MAX_NUM_CLIENTS];
-
-uint8_t node_inbox[65536]; 
-size_t node_inbox_len;
-
-// --- MOCK I/O CALLBACKS ---
-prot_ret_t mock_node_send(void* obj, const uint8_t* data, size_t len) {
-    node_id_t id = *(node_id_t*)obj;
-    memcpy(server_inbox[id], data, len);
-    server_inbox_len[id] = len;
-    return OK;
-}
-
-prot_ret_t mock_srv_send(void* obj, const uint8_t* data, size_t len) {
-    memcpy(node_inbox, data, len);
-    node_inbox_len = len;
-    return OK;
-}
-
-prot_ret_t mock_srv_recv(void* obj, uint8_t* buff, size_t max_len, size_t* out_len) {
-    node_id_t target_id = *(node_id_t*)obj; 
-    if (server_inbox_len[target_id] > 0) {
-        // Prevent buffer overflows in the mock environment
-        size_t copy_len = server_inbox_len[target_id] > max_len ? max_len : server_inbox_len[target_id];
-        memcpy(buff, server_inbox[target_id], copy_len);
-        *out_len = copy_len;
-        server_inbox_len[target_id] = 0; 
-        return OK;
-    }
-    return ERROR;
-}
-
-prot_ret_t mock_node_recv(void* obj, uint8_t* buff, size_t max_len, size_t* out_len) {
-    if (node_inbox_len > 0) {
-        size_t copy_len = node_inbox_len > max_len ? max_len : node_inbox_len;
-        memcpy(buff, node_inbox, copy_len);
-        *out_len = copy_len;
-        return OK;
-    }
-    return ERROR;
-}
+#define NUM_CLIENTS 4
+#define THRESHOLD 2
 
 int main() {
-    printf("=== Starting HeVerSa Protocol Simulation (4 Nodes) ===\n");
+    printf("=== Starting HeVerSa API (WITH DROPOUT SIMULATION) ===\n\n");
 
-    int N = 4; // Participants
-    int K = 2; // Reconstruction Threshold
-
-    // 1. Setup TA (Trusted Authority)
-    // Computes expanded masks and 2D SSS offsets
-    ta_compute_offset(N, K, INITIAL_LINK);
-
-    // 2. Setup Server
     server_t srv;
-    srv_id_t server_id = 99;
-    io_interface_t srv_io = { .send = mock_srv_send, .recv = mock_srv_recv };
-    server_setup(&srv, server_id, srv_io);
+    memset(&srv, 0, sizeof(server_t));
+    srv.srv_id = 99;
 
-    ta_send_global_masks(&srv, N, INITIAL_LINK);
+    node_t clients[NUM_CLIENTS];
+    for (int i = 0; i < NUM_CLIENTS; i++) {
+        memset(&clients[i], 0, sizeof(node_t));
+    }
 
-    // 3. Setup Nodes
-    node_t nodes[4]; 
-    for (int i = 0; i < N; i++) {
-        io_interface_t node_io = { .obj = &nodes[i].node_id, .send = mock_node_send, .recv = mock_node_recv };
-        node_setup(&nodes[i], i, node_io);
-        
-        for(int j=0; j<UPDATE_LEN; j++) {
-            // Populate the 128-bit component array
-            // Node 0: {10, 11, ...}, Node 1: {20, 21, ...}
-            nodes[i].data_update[j] = UInt128::from_uint32((i + 1) * 10 + j); 
+    // 1. Setup Phase
+    ta_setup_protocol(NUM_CLIENTS, THRESHOLD, &srv);
+    for (int i = 0; i < NUM_CLIENTS; i++) {
+        client_setup(&clients[i], i);
+    }
+
+    // 2. Input Weights (C0=10, C1=20, C2=30, C3=40)
+    uint32_t client_weights[NUM_CLIENTS][UPDATE_LEN];
+    for (int i = 0; i < NUM_CLIENTS; i++) {
+        for (int j = 0; j < UPDATE_LEN; j++) {
+            client_weights[i][j] = (i + 1) * 10; 
         }
-        
-        for(int k=0; k<N; k++) {
-            if (k != i) node_set_add(&nodes[i].K_j, k);
+    }
+
+    // ==========================================
+    // PHASE 1: Collect Updates
+    // ==========================================
+    printf("--- PHASE 1: Local Updates ---\n");
+    for (int i = 0; i < NUM_CLIENTS; i++) {
+        node_local_update_t update_msg;
+        client_mask_update(&clients[i], client_weights[i], &update_msg);
+
+        // 🚨 SIMULATE DROPOUT: We skip sending Node 2's packet to the Server
+        if (i == 2) {
+            printf("[Orchestrator] SIMULATING DROPOUT: Dropping Client %d's update!\n", i);
+            continue; 
+        }
+
+        server_receive_update(&srv, &update_msg);
+    }
+
+    // ==========================================
+    // PHASE 2: Dropout Recovery
+    // ==========================================
+    printf("\n--- PHASE 2: Share Exchange ---\n");
+    node_set_t dropouts;
+    srv_dropout_list_t server_drop_packet;
+
+    // Server realizes Node 2 is missing and generates the signed dropout packet
+    server_broadcast_dropouts(&srv, &server_drop_packet, &dropouts);
+
+    for (int i = 0; i < NUM_CLIENTS; i++) {
+        // Check if this specific client is in the dropout list
+        bool is_dropout = false;
+        for(int d = 0; d < dropouts.node_count; d++) {
+            if(dropouts.node_id[d] == i) is_dropout = true;
+        }
+
+        // Only active clients generate shares
+        if (!is_dropout) {
+            node_shares_msg_t share_msg;
+            memset(&share_msg, 0, sizeof(node_shares_msg_t)); 
+
+            // Pass the authentic packet to the client
+            client_compute_shares(&clients[i], &server_drop_packet, &share_msg);
+
+            // Feed shares back to server
+            if (share_msg.item_cnt > 0) {
+                server_receive_shares(&srv, &share_msg);
+            }
         }
     }
 
-    printf("\n--- PHASE 1: Local Updates ---\n");
-    run_node_state(&nodes[0]); 
-    run_node_state(&nodes[1]); 
-    
-    // -> WE INTENTIONALLY DO NOT RUN NODE 2 (DROPOUT SIMULATION) <-
-    printf("[SIM] Node 2 unexpectedly dropped out!\n");
+    // ==========================================
+    // PHASE 3: Finalize
+    // ==========================================
+    printf("\n--- PHASE 3: Final Aggregation ---\n");
+    uint32_t final_model[UPDATE_LEN];
+    server_aggregate_updates(&srv, final_model);
 
-    run_node_state(&nodes[3]); // Node 3 successfully sends
-
-    // Server aggregates received messages
-    for (int i = 0; i < N; i++) {
-        if (i == 2) continue; // Skip dropped node
-        srv.io.obj = &nodes[i].node_id; 
-        server_run_state(&srv);  
+    printf("\n=== FINAL UNMASKED WEIGHTS ===\n");
+    for (int j = 0; j < 4; j++) { 
+        printf("Feature[%d] = %u\n", j, final_model[j]);
     }
+    printf("...\nExpected value: 70\n");
 
-    printf("\n--- PHASE 2: Request Shares ---\n");
-    // Server requests shares for missing nodes
-    srv_state_req_shares(&srv);
-
-    run_node_state(&nodes[0]); 
-    run_node_state(&nodes[1]); 
-    run_node_state(&nodes[3]); // Nodes generate and send 2D shares
-
-    printf("\n--- PHASE 3: Recovery and Global Aggregation ---\n");
-    srv.io.obj = &nodes[0].node_id;
-    srv_state_wait_recovery(&srv);
-    
-    srv.io.obj = &nodes[1].node_id;
-    srv_state_wait_recovery(&srv);
-
-    srv.io.obj = &nodes[3].node_id;
-    srv_state_wait_recovery(&srv); // Node 3 sends shares to server
-
-    if (srv.current_state == srv_state_compute_global) {
-        server_run_state(&srv); 
-    } else {
-        printf("[SIM ERROR] Server failed to recover the dropout!\n");
-        return -1;
-    }
-
-    printf("\n--- PHASE 4: Verification ---\n");
-    run_node_state(&nodes[0]); 
-    run_node_state(&nodes[1]);
-    run_node_state(&nodes[3]); // Nodes receive global array and verify math
-
-    printf("\n=== Simulation Complete ===\n");
     return 0;
 }

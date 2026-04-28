@@ -90,12 +90,6 @@ static void ta_offset_helper(int N, int K, puf_index_t base_idx, share_db_idx_t 
     }
 }
 
-void expand_puf_response(puf_resp_t puf, update_t* obf_update){
-    uint8_t device_key[16];
-    memset(device_key, 0xAB, 16); 
-}
-
-
 void ta_compute_offset(int N, int K, puf_index_t base_idx){
     printf("[TA] Generating offsets\n");
     

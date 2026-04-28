@@ -8,6 +8,8 @@ find_package(OpenSSL REQUIRED)
 add_subdirectory(extern/pybind11)
 
 set(PROTOCOL_SOURCES
+src/heversa_api.cpp
+src/heversa_sim.cpp
 src/node.cpp
 src/server.cpp
 src/ta.cpp

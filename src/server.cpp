@@ -107,7 +107,7 @@ static bool dropout_recovered(server_t* srv){
         }
     }
 
-    for(int i=0; i<srv->Z_set.node_count; i++) {
+    for(int i=0; i<srv->J_prime_set.node_count; i++) {
         node_id_t a_id = srv->J_prime_set.node_id[i];
         if (!ctx_noise[a_id].done || !ctx_noise_verif[a_id].done) {
             return false;
@@ -403,7 +403,7 @@ void srv_state_wait_recovery(server_t* srv){
         #if DEBUG
         printf("[SERVER] Recovery complete. Finalizing.\n");
         #endif
-        srv->current_state = srv_state_compute_global;
+        //srv->current_state = srv_state_compute_global;
     }
 }
 
