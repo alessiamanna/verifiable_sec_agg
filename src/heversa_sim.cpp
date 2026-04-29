@@ -1,5 +1,7 @@
 #include "heversa_sim.h"
+#include "msg_type.h"
 #include <stdio.h>
+#include <memory>
 
 void run_federated_round_sim(
     server_t* srv, 
@@ -10,19 +12,18 @@ void run_federated_round_sim(
 {
     // --- PHASE 1: Collect Updates ---
     for (int i = 0; i < num_clients; i++) {
-        node_local_update_t update_msg;
+        auto update_msg = std::make_unique<node_local_update_t>();
         // 1. Client obfuscates
-        client_mask_update(&clients[i], client_weights[i], &update_msg);
+        client_mask_update(&clients[i], client_weights[i], update_msg.get());
         // 2. Server receives
-        server_receive_update(srv, &update_msg);
+        server_receive_update(srv, update_msg.get());
     }
 
     // --- ORCHESTRATOR: Check Dropouts ---
     node_set_t dropouts;
-    srv_dropout_list_t server_drop_packet;
-    
+    auto server_drop_packet = std::make_unique<srv_dropout_list_t>();    
     // Server builds the signed packet
-    server_broadcast_dropouts(srv, &server_drop_packet, &dropouts);
+    server_broadcast_dropouts(srv, server_drop_packet.get(), &dropouts);
     
     // --- PHASE 2: Share Exchange (ALWAYS RUNS) ---
     for (int i = 0; i < num_clients; i++) {
@@ -34,14 +35,14 @@ void run_federated_round_sim(
         
         // Active clients consume the server packet and generate shares
         if (!is_dropout) {
-            node_shares_msg_t share_msg;
-            memset(&share_msg, 0, sizeof(node_shares_msg_t)); 
+            auto share_msg = std::make_unique<node_shares_msg_t>();
+            memset(share_msg.get(), 0, sizeof(node_shares_msg_t)); 
             
             // Pass the authentic packet to the client
-            client_compute_shares(&clients[i], &server_drop_packet, &share_msg);
+            client_compute_shares(&clients[i], server_drop_packet.get(), share_msg.get());
             
-            if (share_msg.item_cnt > 0) {
-                server_receive_shares(srv, &share_msg);
+            if (share_msg->item_cnt > 0) {
+                server_receive_shares(srv, share_msg.get());
             }
         }
     }

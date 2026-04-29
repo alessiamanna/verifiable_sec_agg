@@ -7,15 +7,21 @@
 #include "int128.h"
 
 #define DEBUG 1
-#define MAX_NUM_CLIENTS 4 //for now let's consider node A-B-C-D
+
 #define INITIAL_LINK 0 
 
+#ifndef MAX_NUM_CLIENTS
+#define MAX_NUM_CLIENTS 4 //for now let's consider node A-B-C-D
+#endif
+
+#ifndef UPDATE_LEN
+#define UPDATE_LEN 16 // for now let's assume 128bit update, 16 bit x 8 components.
+#endif
 
 //TODO: these values should be generated through a random seed 
 #define VERIF_A 3
 #define VERIF_B 5
 
-#define UPDATE_LEN 16 // for now let's assume 128bit update, 16 bit x 8 components.
 
 #define LINK_MASK_DATA 0
 #define LINK_NOISE_DATA 1

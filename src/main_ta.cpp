@@ -1,30 +1,31 @@
 #include <stdio.h>
 #include <string.h>
+#include <memory>
 #include "heversa_api.h"
 
-#define NUM_CLIENTS 4
-#define THRESHOLD 2
+#define NUM_CLIENTS 10
+#define THRESHOLD 4
 
 int main() {
-    printf("=== Starting HeVerSa API (WITH DROPOUT SIMULATION) ===\n\n");
+    printf("=== Starting HeVerSa API (10 Clients, 3 Dropouts) ===\n\n");
 
     server_t srv;
     memset(&srv, 0, sizeof(server_t));
     srv.srv_id = 99;
 
-    node_t clients[NUM_CLIENTS];
+
+    auto clients = std::make_unique<node_t[]>(NUM_CLIENTS);
     for (int i = 0; i < NUM_CLIENTS; i++) {
         memset(&clients[i], 0, sizeof(node_t));
     }
 
-    // 1. Setup Phase
     ta_setup_protocol(NUM_CLIENTS, THRESHOLD, &srv);
     for (int i = 0; i < NUM_CLIENTS; i++) {
         client_setup(&clients[i], i);
     }
 
-    // 2. Input Weights (C0=10, C1=20, C2=30, C3=40)
-    uint32_t client_weights[NUM_CLIENTS][UPDATE_LEN];
+
+    auto client_weights = std::make_unique<uint32_t[][UPDATE_LEN]>(NUM_CLIENTS);
     for (int i = 0; i < NUM_CLIENTS; i++) {
         for (int j = 0; j < UPDATE_LEN; j++) {
             client_weights[i][j] = (i + 1) * 10; 
@@ -36,16 +37,18 @@ int main() {
     // ==========================================
     printf("--- PHASE 1: Local Updates ---\n");
     for (int i = 0; i < NUM_CLIENTS; i++) {
-        node_local_update_t update_msg;
-        client_mask_update(&clients[i], client_weights[i], &update_msg);
 
-        // 🚨 SIMULATE DROPOUT: We skip sending Node 2's packet to the Server
-        if (i == 2) {
+        auto update_msg = std::make_unique<node_local_update_t>();
+        
+        client_mask_update(&clients[i], client_weights[i], update_msg.get());
+
+
+        if (i == 2 || i == 5 || i == 8) {
             printf("[Orchestrator] SIMULATING DROPOUT: Dropping Client %d's update!\n", i);
             continue; 
         }
 
-        server_receive_update(&srv, &update_msg);
+        server_receive_update(&srv, update_msg.get());
     }
 
     // ==========================================
@@ -53,29 +56,26 @@ int main() {
     // ==========================================
     printf("\n--- PHASE 2: Share Exchange ---\n");
     node_set_t dropouts;
-    srv_dropout_list_t server_drop_packet;
+    auto server_drop_packet = std::make_unique<srv_dropout_list_t>();
 
-    // Server realizes Node 2 is missing and generates the signed dropout packet
-    server_broadcast_dropouts(&srv, &server_drop_packet, &dropouts);
+    server_broadcast_dropouts(&srv, server_drop_packet.get(), &dropouts);
 
     for (int i = 0; i < NUM_CLIENTS; i++) {
-        // Check if this specific client is in the dropout list
         bool is_dropout = false;
         for(int d = 0; d < dropouts.node_count; d++) {
             if(dropouts.node_id[d] == i) is_dropout = true;
         }
 
-        // Only active clients generate shares
         if (!is_dropout) {
-            node_shares_msg_t share_msg;
-            memset(&share_msg, 0, sizeof(node_shares_msg_t)); 
+            auto share_msg = std::make_unique<node_shares_msg_t>();
+            memset(share_msg.get(), 0, sizeof(node_shares_msg_t)); 
 
             // Pass the authentic packet to the client
-            client_compute_shares(&clients[i], &server_drop_packet, &share_msg);
+            client_compute_shares(&clients[i], server_drop_packet.get(), share_msg.get());
 
-            // Feed shares back to server
-            if (share_msg.item_cnt > 0) {
-                server_receive_shares(&srv, &share_msg);
+          
+            if (share_msg->item_cnt > 0) {
+                server_receive_shares(&srv, share_msg.get());
             }
         }
     }
@@ -84,14 +84,14 @@ int main() {
     // PHASE 3: Finalize
     // ==========================================
     printf("\n--- PHASE 3: Final Aggregation ---\n");
-    uint32_t final_model[UPDATE_LEN];
-    server_aggregate_updates(&srv, final_model);
+    auto final_model = std::make_unique<uint32_t[]>(UPDATE_LEN);
+    server_aggregate_updates(&srv, final_model.get());
 
     printf("\n=== FINAL UNMASKED WEIGHTS ===\n");
     for (int j = 0; j < 4; j++) { 
         printf("Feature[%d] = %u\n", j, final_model[j]);
     }
-    printf("...\nExpected value: 70\n");
+    printf("...\nExpected value: 370\n");
 
     return 0;
 }

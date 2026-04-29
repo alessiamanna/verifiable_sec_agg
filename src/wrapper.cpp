@@ -1,6 +1,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/numpy.h>
 #include <pybind11/stl.h>
+#include <memory>
 #include "heversa_api.h"
 
 namespace py = pybind11;
@@ -9,14 +10,15 @@ node_local_update_t py_client_mask_update(node_t& node, py::array_t<uint32_t> we
     py::buffer_info buf = weights.request();
     
     if (buf.size != UPDATE_LEN) {
-        throw std::runtime_error("Weights array must have exactly UPDATE_LEN elements.");
+        throw std::runtime_error("Weights array must match compiled UPDATE_LEN.");
     }
     
     uint32_t* ptr = static_cast<uint32_t*>(buf.ptr);
-    node_local_update_t out_msg;
     
-    client_mask_update(&node, ptr, &out_msg);
-    return out_msg;
+    auto out_msg = std::make_unique<node_local_update_t>();
+    
+    client_mask_update(&node, ptr, out_msg.get());
+    return *out_msg;
 }
 
 py::array_t<uint32_t> py_server_aggregate_updates(server_t& srv) {
@@ -65,7 +67,6 @@ PYBIND11_MODULE(heversa, m) {
     m.def("server_receive_update", [](server_t& srv, node_local_update_t& msg) {
         server_receive_update(&srv, &msg);
     }, "Feed an update into the server");
-
 
     m.def("server_broadcast_dropouts", [](server_t& srv) {
         srv_dropout_list_t drop_msg;
