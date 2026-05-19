@@ -3,6 +3,7 @@ import importlib
 import importlib.machinery
 import json
 import math
+import os
 import random
 import sys
 import tempfile
@@ -42,9 +43,10 @@ QUANT_SCALE = 1_000_000.0
 CHUNK_LOG_INTERVAL = 25
 KERAS_VERBOSE = 2
 REPRESENTATIVE_SAMPLES = 256
-SUPPORTED_FL_FRAMEWORKS = ("fedavg",)
+SUPPORTED_FL_FRAMEWORKS = ("fedavg", "fedavg_qat")
 MODEL_OUTPUT_DIR = Path("fl/models")
 RESULT_OUTPUT_DIR = Path("fl/results")
+KERAS_HOME_DIR = Path(".keras")
 
 
 @dataclass(frozen=True)
@@ -62,6 +64,10 @@ def import_tensorflow():
     global tf
 
     if tf is None:
+        keras_home = Path(__file__).resolve().parents[1] / KERAS_HOME_DIR
+        os.environ.setdefault("KERAS_HOME", str(keras_home))
+        keras_home.mkdir(parents=True, exist_ok=True)
+
         # TensorFlow 1.14 emits this with newer NumPy during import. It is noisy
         # but not actionable for this training script.
         warnings.filterwarnings(
@@ -95,10 +101,12 @@ def set_random_seed(seed):
 
 def find_heversa_module_dirs(repo_root):
     """Return likely directories containing the built HeVerSa extension."""
-    build_dir = repo_root / "build"
     module_dirs = []
 
-    if build_dir.exists():
+    for build_dir in (repo_root / "build", repo_root / "build-clang"):
+        if not build_dir.exists():
+            continue
+
         suffixes = set(importlib.machinery.EXTENSION_SUFFIXES)
         suffixes.update({".pyd", ".so"})
         for suffix in suffixes:
@@ -115,6 +123,10 @@ def import_heversa(repo_root):
         repo_root / "build" / "Release",
         repo_root / "build" / "Debug",
         repo_root / "build" / "RelWithDebInfo",
+        repo_root / "build-clang",
+        repo_root / "build-clang" / "Release",
+        repo_root / "build-clang" / "Debug",
+        repo_root / "build-clang" / "RelWithDebInfo",
         repo_root,
     ]
 
@@ -297,7 +309,37 @@ def build_framework_strategies(framework_name, heversa, protocol_config):
             keras_verbose=KERAS_VERBOSE,
         )
 
+    if framework_name == "fedavg_qat":
+        try:
+            from .fedavg_qat import (
+                build_strategies as build_fedavg_qat_strategies,
+            )
+        except ImportError:
+            from fedavg_qat import (
+                build_strategies as build_fedavg_qat_strategies,
+            )
+
+        return build_fedavg_qat_strategies(
+            heversa=heversa,
+            protocol_config=protocol_config,
+            clear_session=tf.keras.backend.clear_session,
+            keras_verbose=KERAS_VERBOSE,
+        )
+
     raise ValueError(f"Unsupported FL framework: {framework_name}")
+
+
+def add_framework_config(framework_name, payload):
+    """Attach framework-specific metadata to the result payload."""
+    if framework_name == "fedavg_qat":
+        try:
+            from .fedavg_qat import add_qat_config
+        except ImportError:
+            from fedavg_qat import add_qat_config
+
+        return add_qat_config(payload)
+
+    return payload
 
 
 def safe_name(name):
@@ -410,7 +452,13 @@ def train(args):
         seed=args.seed,
     )
 
-    seed_model = build_cifar10_cnn()
+    strategies = build_framework_strategies(
+        framework_name=args.fl_framework,
+        heversa=heversa,
+        protocol_config=protocol_config,
+    )
+
+    seed_model = strategies[0].create_model()
     initial_weights = seed_model.get_weights()
     initial_flat, _, _ = flatten_weights(initial_weights)
     tf.keras.backend.clear_session()
@@ -425,11 +473,6 @@ def train(args):
         f"{math.ceil(initial_flat.size / protocol_config.update_len)}"
     )
 
-    strategies = build_framework_strategies(
-        framework_name=args.fl_framework,
-        heversa=heversa,
-        protocol_config=protocol_config,
-    )
     results = []
 
     for strategy in strategies:
@@ -466,15 +509,16 @@ def train(args):
             eval_tflite=args.eval_tflite,
         )
 
+    payload = results_payload(
+        args=args,
+        protocol_config=protocol_config,
+        strategy_names=strategy_names,
+        metrics_by_variant=metrics_by_variant,
+        model_outputs=model_outputs,
+    )
     save_comparison_results(
         results_output_path(strategy_names),
-        results_payload(
-            args=args,
-            protocol_config=protocol_config,
-            strategy_names=strategy_names,
-            metrics_by_variant=metrics_by_variant,
-            model_outputs=model_outputs,
-        ),
+        add_framework_config(args.fl_framework, payload),
     )
 
 

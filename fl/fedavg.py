@@ -215,9 +215,15 @@ class FederatedStrategy:
 class FedAvgPlainStrategy(FederatedStrategy):
     """FedAvg with ordinary plaintext weighted averaging."""
 
-    def __init__(self, model_builder, clear_session, keras_verbose):
+    def __init__(
+        self,
+        model_builder,
+        clear_session,
+        keras_verbose,
+        name="fedavg_plain",
+    ):
         super().__init__(
-            name="fedavg_plain",
+            name=name,
             model_builder=model_builder,
             clear_session=clear_session,
             keras_verbose=keras_verbose,
@@ -237,9 +243,10 @@ class FedAvgHeVersaStrategy(FederatedStrategy):
         model_builder,
         clear_session,
         keras_verbose,
+        name="fedavg_heversa",
     ):
         super().__init__(
-            name="fedavg_heversa",
+            name=name,
             model_builder=model_builder,
             clear_session=clear_session,
             keras_verbose=keras_verbose,

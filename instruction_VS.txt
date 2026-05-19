@@ -57,6 +57,10 @@ The compiled Python module should end up under:
 
   build-clang\Release
 
+The Python scripts set KERAS_HOME to the repository-local .keras folder before
+loading TensorFlow. This avoids Windows permission problems from stale or
+partially extracted files under C:\Users\<you>\.keras\datasets.
+
 
 5. Run the CIFAR-10 comparison script
 -------------------------------------
@@ -73,6 +77,14 @@ Full default run:
 
   python fl\cifar10_heversa.py
 
+Quantization-aware FedAvg comparison run:
+
+  python fl\cifar10_heversa.py --fl-framework fedavg_qat
+
+Quick QAT smoke test:
+
+  python fl\cifar10_heversa.py --fl-framework fedavg_qat --rounds 1 --train-limit 1000 --test-limit 500
+
 
 6. Output files
 ---------------
@@ -85,9 +97,21 @@ FedAvg with HeVerSa TFLite model:
 
   fl\models\cifar10_fedavg_heversa_int8.tflite
 
+Plain FedAvg with QAT TFLite model:
+
+  fl\models\cifar10_fedavg_qat_plain_int8.tflite
+
+FedAvg with QAT and HeVerSa TFLite model:
+
+  fl\models\cifar10_fedavg_qat_heversa_int8.tflite
+
 Comparison results:
 
   fl\results\cifar10_fedavg_plain_vs_fedavg_heversa.json
+
+QAT results:
+
+  fl\results\cifar10_fedavg_qat_plain_vs_fedavg_qat_heversa.json
 
 These names are generated automatically from the selected FL framework and
 strategy names. They are not passed as command-line arguments.
