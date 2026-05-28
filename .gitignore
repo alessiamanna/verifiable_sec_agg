@@ -40,6 +40,7 @@ fl/results/*
 !fl/results/.gitkeep
 !fl/models/README.md
 !fl/results/README.md
+fl/*.out
 
 # Model/checkpoint artifacts wherever they are produced
 *.tflite

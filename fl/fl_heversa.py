@@ -1,12 +1,16 @@
 import argparse
+import contextlib
 import importlib
 import importlib.machinery
 import json
 import math
 import os
+import pickle
 import random
+import shutil
 import sys
 import tempfile
+import time
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -60,6 +64,13 @@ NETWORK_MODULES = {
     "cnn": cnn,
     "mlp": mlp,
 }
+DATASET_LOCK_POLL_SECONDS = 5
+DATASET_CORRUPTION_EXCEPTIONS = (
+    EOFError,
+    OSError,
+    ValueError,
+    pickle.UnpicklingError,
+)
 
 
 @dataclass(frozen=True)
@@ -105,12 +116,76 @@ DATASET_CONFIGS = {
 }
 
 
+def keras_home_path():
+    """Return the repo-local Keras cache directory."""
+    return Path(
+        os.environ.get(
+            "KERAS_HOME",
+            Path(__file__).resolve().parents[1] / KERAS_HOME_DIR,
+        )
+    )
+
+
+@contextlib.contextmanager
+def dataset_cache_lock(dataset_name):
+    """Serialize dataset cache downloads/extracts across Slurm jobs."""
+    lock_root = keras_home_path() / "locks"
+    lock_root.mkdir(parents=True, exist_ok=True)
+    lock_path = lock_root / f"{dataset_name}.lock"
+    lock_file = lock_path.open("w", encoding="utf-8")
+
+    try:
+        try:
+            import fcntl
+        except ImportError:
+            yield
+            return
+
+        print(f"waiting for {dataset_name} dataset cache lock", flush=True)
+        fcntl.flock(lock_file, fcntl.LOCK_EX)
+        print(f"acquired {dataset_name} dataset cache lock", flush=True)
+        yield
+    finally:
+        try:
+            if "fcntl" in locals():
+                fcntl.flock(lock_file, fcntl.LOCK_UN)
+        finally:
+            lock_file.close()
+
+
+def remove_keras_dataset_cache(*prefixes):
+    """Remove selected repo-local Keras dataset cache entries."""
+    dataset_dir = keras_home_path() / "datasets"
+    for prefix in prefixes:
+        for path in dataset_dir.glob(f"{prefix}*"):
+            if path.is_dir():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
+
+
+def load_dataset_with_cache_retry(dataset_name, cache_prefixes, load_fn):
+    """Load a dataset, clearing its cache once if it was partially written."""
+    with dataset_cache_lock(dataset_name):
+        try:
+            return load_fn()
+        except DATASET_CORRUPTION_EXCEPTIONS as exc:
+            print(
+                f"{dataset_name} cache looks corrupted ({exc}); "
+                "clearing cache and retrying once",
+                flush=True,
+            )
+            remove_keras_dataset_cache(*cache_prefixes)
+            time.sleep(DATASET_LOCK_POLL_SECONDS)
+            return load_fn()
+
+
 def import_tensorflow():
     """Import TensorFlow lazily so HeVerSa build errors stay readable."""
     global tf
 
     if tf is None:
-        keras_home = Path(__file__).resolve().parents[1] / KERAS_HOME_DIR
+        keras_home = keras_home_path()
         os.environ.setdefault("KERAS_HOME", str(keras_home))
         keras_home.mkdir(parents=True, exist_ok=True)
 
@@ -360,7 +435,11 @@ def preprocess_image_data(x_train, y_train, x_test, y_test):
 
 def load_cifar10_clients(num_clients, train_limit, test_limit, seed):
     """Load CIFAR-10, normalize images, and split train data by client."""
-    (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
+    (x_train, y_train), (x_test, y_test) = load_dataset_with_cache_retry(
+        dataset_name="cifar10",
+        cache_prefixes=("cifar-10-batches-py",),
+        load_fn=tf.keras.datasets.cifar10.load_data,
+    )
     x_train, y_train, x_test, y_test = preprocess_image_data(
         x_train,
         y_train,
@@ -380,7 +459,11 @@ def load_cifar10_clients(num_clients, train_limit, test_limit, seed):
 
 def load_mnist_clients(num_clients, train_limit, test_limit, seed):
     """Load MNIST, normalize images, add a channel, and split train data."""
-    (x_train, y_train), (x_test, y_test) = tf.keras.datasets.mnist.load_data()
+    (x_train, y_train), (x_test, y_test) = load_dataset_with_cache_retry(
+        dataset_name="mnist",
+        cache_prefixes=("mnist.npz",),
+        load_fn=tf.keras.datasets.mnist.load_data,
+    )
     x_train, y_train, x_test, y_test = preprocess_image_data(
         x_train,
         y_train,
@@ -424,8 +507,9 @@ def load_organamnist_clients(num_clients, train_limit, test_limit, seed):
         ) from exc
 
     repo_root = Path(__file__).resolve().parents[1]
-    x_train, y_train = load_medmnist_split(OrganAMNIST, "train", repo_root)
-    x_test, y_test = load_medmnist_split(OrganAMNIST, "test", repo_root)
+    with dataset_cache_lock("organamnist"):
+        x_train, y_train = load_medmnist_split(OrganAMNIST, "train", repo_root)
+        x_test, y_test = load_medmnist_split(OrganAMNIST, "test", repo_root)
     x_train, y_train, x_test, y_test = preprocess_image_data(
         x_train,
         y_train,
@@ -519,23 +603,34 @@ def safe_name(name):
     return name.strip().lower().replace(" ", "_").replace("-", "_")
 
 
-def model_output_path(strategy_name, dataset_name, network_name):
+def experiment_name_parts(dataset_name, network_name, rep_name=None):
+    """Return stable filename parts shared by model and result outputs."""
+    parts = [safe_name(dataset_name), safe_name(network_name)]
+    if rep_name:
+        parts.append(safe_name(rep_name))
+    return parts
+
+
+def model_output_path(strategy_name, dataset_name, network_name, rep_name=None):
     """Derive the TFLite output path from the selected strategy."""
     return (
         MODEL_OUTPUT_DIR
         / (
-            f"{safe_name(dataset_name)}_{safe_name(network_name)}_"
+            f"{'_'.join(experiment_name_parts(dataset_name, network_name, rep_name))}_"
             f"{safe_name(strategy_name)}_int8.tflite"
         )
     )
 
 
-def results_output_path(strategy_names, dataset_name, network_name):
+def results_output_path(strategy_names, dataset_name, network_name, rep_name=None):
     """Derive the JSON output path from the selected strategy comparison."""
     comparison_name = "_vs_".join(safe_name(name) for name in strategy_names)
     return (
         RESULT_OUTPUT_DIR
-        / f"{safe_name(dataset_name)}_{safe_name(network_name)}_{comparison_name}.json"
+        / (
+            f"{'_'.join(experiment_name_parts(dataset_name, network_name, rep_name))}_"
+            f"{comparison_name}.json"
+        )
     )
 
 
@@ -587,6 +682,7 @@ def results_payload(args, protocol_config, strategy_names, metrics_by_variant, m
             "train_limit": args.train_limit,
             "test_limit": args.test_limit,
             "seed": args.seed,
+            "rep_name": args.rep_name,
             "quant_scale": protocol_config.quant_scale,
         },
         "model_outputs": model_outputs,
@@ -629,6 +725,8 @@ def train(args):
         args.dataset = "cifar10"
     if not hasattr(args, "network"):
         args.network = "cnn"
+    if not hasattr(args, "rep_name"):
+        args.rep_name = None
     dataset_config = get_dataset_config(args.dataset)
 
     set_random_seed(args.seed)
@@ -689,7 +787,14 @@ def train(args):
     }
     strategy_names = [result.name for result in results]
     model_outputs = {
-        result.name: str(model_output_path(result.name, args.dataset, args.network))
+        result.name: str(
+            model_output_path(
+                result.name,
+                args.dataset,
+                args.network,
+                rep_name=args.rep_name,
+            )
+        )
         for result in results
     }
 
@@ -712,7 +817,12 @@ def train(args):
         model_outputs=model_outputs,
     )
     save_comparison_results(
-        results_output_path(strategy_names, args.dataset, args.network),
+        results_output_path(
+            strategy_names,
+            args.dataset,
+            args.network,
+            rep_name=args.rep_name,
+        ),
         add_framework_config(args.fl_framework, payload),
     )
 
@@ -742,6 +852,7 @@ def parse_args():
     parser.add_argument("--train-limit", type=int, default=8000)
     parser.add_argument("--test-limit", type=int, default=2000)
     parser.add_argument("--seed", type=int, default=26)
+    parser.add_argument("--rep-name", default=None)
     parser.add_argument("--eval-tflite", action="store_true")
     return parser.parse_args()
 

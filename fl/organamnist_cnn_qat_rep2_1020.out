@@ -1,0 +1,25 @@
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1779977909.802828  444322 port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+I0000 00:00:1779977909.853050  444322 cpu_feature_guard.cc:227] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI AVX512_BF16 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1779977911.704947  444322 port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+Traceback (most recent call last):
+  File "/lustre/home/frroccod/verifiable_sec_agg/fl/fl_heversa.py", line 502, in load_organamnist_clients
+    from medmnist import OrganAMNIST
+ModuleNotFoundError: No module named 'medmnist'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/lustre/home/frroccod/verifiable_sec_agg/fl/fl_heversa.py", line 865, in <module>
+    main()
+  File "/lustre/home/frroccod/verifiable_sec_agg/fl/fl_heversa.py", line 861, in main
+    train(parse_args())
+  File "/lustre/home/frroccod/verifiable_sec_agg/fl/fl_heversa.py", line 734, in train
+    client_data, test_data = load_dataset_clients(
+  File "/lustre/home/frroccod/verifiable_sec_agg/fl/fl_heversa.py", line 539, in load_dataset_clients
+    return load_organamnist_clients(num_clients, train_limit, test_limit, seed)
+  File "/lustre/home/frroccod/verifiable_sec_agg/fl/fl_heversa.py", line 504, in load_organamnist_clients
+    raise ModuleNotFoundError(
+ModuleNotFoundError: OrganAMNIST requires the medmnist package. Install it in the active environment with: python -m pip install medmnist

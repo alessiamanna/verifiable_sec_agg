@@ -1,0 +1,45 @@
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1779977740.441613  343880 port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+I0000 00:00:1779977742.241405  343880 cpu_feature_guard.cc:227] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI AVX512_BF16 FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1779977750.101369  343880 port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+Traceback (most recent call last):
+  File "/lustre/home/frroccod/.conda/envs/heversa310/lib/python3.10/tarfile.py", line 2562, in makefile
+    copyfileobj(source, target, tarinfo.size, ReadError, bufsize)
+  File "/lustre/home/frroccod/.conda/envs/heversa310/lib/python3.10/tarfile.py", line 255, in copyfileobj
+    dst.write(buf)
+OSError: [Errno 14] Bad address
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "/lustre/home/frroccod/verifiable_sec_agg/fl/fl_heversa.py", line 781, in <module>
+    main()
+  File "/lustre/home/frroccod/verifiable_sec_agg/fl/fl_heversa.py", line 777, in main
+    train(parse_args())
+  File "/lustre/home/frroccod/verifiable_sec_agg/fl/fl_heversa.py", line 650, in train
+    client_data, test_data = load_dataset_clients(
+  File "/lustre/home/frroccod/verifiable_sec_agg/fl/fl_heversa.py", line 451, in load_dataset_clients
+    return load_cifar10_clients(num_clients, train_limit, test_limit, seed)
+  File "/lustre/home/frroccod/verifiable_sec_agg/fl/fl_heversa.py", line 363, in load_cifar10_clients
+    (x_train, y_train), (x_test, y_test) = tf.keras.datasets.cifar10.load_data()
+  File "/lustre/home/frroccod/.conda/envs/heversa310/lib/python3.10/site-packages/keras/src/datasets/cifar10.py", line 65, in load_data
+    path = get_file(
+  File "/lustre/home/frroccod/.conda/envs/heversa310/lib/python3.10/site-packages/keras/src/utils/file_utils.py", line 413, in get_file
+    status = extract_archive(
+  File "/lustre/home/frroccod/.conda/envs/heversa310/lib/python3.10/site-packages/keras/src/utils/file_utils.py", line 191, in extract_archive
+    extract_open_archive(archive, path)
+  File "/lustre/home/frroccod/.conda/envs/heversa310/lib/python3.10/site-packages/keras/src/utils/file_utils.py", line 143, in extract_open_archive
+    archive.extractall(
+  File "/lustre/home/frroccod/.conda/envs/heversa310/lib/python3.10/tarfile.py", line 2314, in extractall
+    self._extract_one(tarinfo, path, set_attrs=not tarinfo.isdir(),
+  File "/lustre/home/frroccod/.conda/envs/heversa310/lib/python3.10/tarfile.py", line 2423, in _extract_one
+    self._handle_fatal_error(e)
+  File "/lustre/home/frroccod/.conda/envs/heversa310/lib/python3.10/tarfile.py", line 2417, in _extract_one
+    self._extract_member(tarinfo, os.path.join(path, tarinfo.name),
+  File "/lustre/home/frroccod/.conda/envs/heversa310/lib/python3.10/tarfile.py", line 2506, in _extract_member
+    self.makefile(tarinfo, targetpath)
+  File "/lustre/home/frroccod/.conda/envs/heversa310/lib/python3.10/tarfile.py", line 2554, in makefile
+    with bltn_open(targetpath, "wb") as target:
+OSError: [Errno 14] Bad address

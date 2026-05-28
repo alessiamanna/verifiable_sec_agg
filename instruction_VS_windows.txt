@@ -1,0 +1,170 @@
+HeVerSa Windows build and run instructions
+=========================================
+
+Use these commands from "Developer Command Prompt for VS" or
+"x64 Native Tools Command Prompt for VS".
+
+Do not run the commands from:
+  C:\Program Files\Microsoft Visual Studio\...
+
+First move to the repository root:
+
+  cd /d C:\Users\franc\Documents\GitHub\verifiable_sec_agg
+
+
+1. Activate the Conda environment
+---------------------------------
+
+  conda activate heversa310
+
+
+2. Fresh checkout only: repair Linux symlinks
+--------------------------------------------
+
+Only do this if src\sss\randombytes.h and src\sss\randombytes.c are plain
+text files containing paths instead of real symlinks.
+
+  del src\sss\randombytes.h
+  del src\sss\randombytes.c
+  mklink src\sss\randombytes.h randombytes\randombytes.h
+  mklink src\sss\randombytes.c randombytes\randombytes.c
+
+If mklink fails with permission denied, enable Windows Developer Mode or run
+the VS prompt as Administrator.
+
+
+3. Configure with ClangCL
+-------------------------
+
+Run this as one single command:
+
+  cmake -S . -B build-clang -T ClangCL -DPython_EXECUTABLE="%CONDA_PREFIX%/python.exe" -DPython_INCLUDE_DIR="%CONDA_PREFIX%/include" -DPython_LIBRARY="%CONDA_PREFIX%/libs/python310.lib" -DOPENSSL_ROOT_DIR="%CONDA_PREFIX%/Library" -DCMAKE_CXX_FLAGS="/EHsc /GR /DMAX_NUM_CLIENTS=10"
+
+Notes:
+  - ClangCL is needed because the C++ code was written for Linux/GCC-style
+    syntax.
+  - /EHsc enables C++ exceptions for pybind11.
+  - /GR enables RTTI.
+  - /DMAX_NUM_CLIENTS=10 matches the generated PUF data.
+
+
+4. Build the Python extension
+-----------------------------
+
+  cmake --build build-clang --config Release --target heversa
+
+The compiled Python module should end up under:
+
+  build-clang\Release
+
+The Python scripts set KERAS_HOME to the repository-local .keras folder before
+loading TensorFlow. This avoids Windows permission problems from stale or
+partially extracted files under C:\Users\<you>\.keras\datasets.
+
+
+5. Run the FL comparison script
+-------------------------------
+
+Set PYTHONPATH so Python can import the compiled heversa module:
+
+  set PYTHONPATH=%CD%\build-clang\Release;%PYTHONPATH%
+
+Quick test run:
+
+  python fl\fl_heversa.py --fl-framework fedavg --rounds 1 --train-limit 1000 --test-limit 500
+
+CIFAR-10 is the default dataset. To run MNIST:
+
+  python fl\fl_heversa.py --dataset mnist --fl-framework fedavg --rounds 1 --train-limit 1000 --test-limit 500
+
+To run OrganAMNIST, install MedMNIST once in the active environment:
+
+  python -m pip install medmnist
+
+Then run:
+
+  python fl\fl_heversa.py --dataset organamnist --fl-framework fedavg --rounds 1 --train-limit 1000 --test-limit 500
+
+The default network is the CNN. To run the same flow with the MLP:
+
+  python fl\fl_heversa.py --network mlp --rounds 1 --train-limit 1000 --test-limit 500
+
+Full default run:
+
+  python fl\fl_heversa.py
+
+Quantization-aware FedAvg comparison run:
+
+  python fl\fl_heversa.py --fl-framework fedavg_qat
+
+Quick QAT smoke test:
+
+  python fl\fl_heversa.py --fl-framework fedavg_qat --rounds 1 --train-limit 1000 --test-limit 500
+
+Quick QAT smoke test with MNIST:
+
+  python fl\fl_heversa.py --dataset mnist --fl-framework fedavg_qat --rounds 1 --train-limit 1000 --test-limit 500
+
+Quick QAT smoke test with OrganAMNIST:
+
+  python fl\fl_heversa.py --dataset organamnist --fl-framework fedavg_qat --rounds 1 --train-limit 1000 --test-limit 500
+
+Quick QAT smoke test with the MLP:
+
+  python fl\fl_heversa.py --fl-framework fedavg_qat --network mlp --rounds 1 --train-limit 1000 --test-limit 500
+
+
+6. Output files
+---------------
+
+Plain FedAvg TFLite model:
+
+  fl\models\cifar10_cnn_fedavg_plain_int8.tflite
+
+FedAvg with HeVerSa TFLite model:
+
+  fl\models\cifar10_cnn_fedavg_heversa_int8.tflite
+
+Plain FedAvg with QAT TFLite model:
+
+  fl\models\cifar10_cnn_fedavg_qat_plain_int8.tflite
+
+FedAvg with QAT and HeVerSa TFLite model:
+
+  fl\models\cifar10_cnn_fedavg_qat_heversa_int8.tflite
+
+Comparison results:
+
+  fl\results\cifar10_cnn_fedavg_plain_vs_fedavg_heversa.json
+
+QAT results:
+
+  fl\results\cifar10_cnn_fedavg_qat_plain_vs_fedavg_qat_heversa.json
+
+These names are generated automatically from the selected dataset, network, FL
+framework, and strategy names. They are not passed as command-line arguments.
+MNIST, OrganAMNIST, and MLP runs use the same pattern with mnist_...,
+organamnist_..., and ..._mlp_... filenames.
+
+
+7. If CMake gets confused
+-------------------------
+
+Use a new build folder instead of fighting old cache entries:
+
+  cmake -S . -B build-clang-new -T ClangCL -DPython_EXECUTABLE="%CONDA_PREFIX%/python.exe" -DPython_INCLUDE_DIR="%CONDA_PREFIX%/include" -DPython_LIBRARY="%CONDA_PREFIX%/libs/python310.lib" -DOPENSSL_ROOT_DIR="%CONDA_PREFIX%/Library" -DCMAKE_CXX_FLAGS="/EHsc /GR /DMAX_NUM_CLIENTS=10"
+  cmake --build build-clang-new --config Release --target heversa
+  set PYTHONPATH=%CD%\build-clang-new\Release;%PYTHONPATH%
+  python fl\fl_heversa.py --fl-framework fedavg --rounds 1 --train-limit 1000 --test-limit 500
+
+
+8. Common mistakes
+------------------
+
+Do not paste PowerShell line continuations (`) into cmd.exe.
+In Developer Command Prompt, use the one-line commands above.
+
+Do not run -D... flags by themselves. They are arguments to cmake -S . -B ...
+
+Do not configure from the Visual Studio install directory. Always cd into the
+repository root first.
