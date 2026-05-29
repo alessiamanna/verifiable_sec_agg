@@ -1,5 +1,6 @@
 import argparse
 import contextlib
+import hashlib
 import importlib
 import importlib.machinery
 import json
@@ -56,10 +57,17 @@ REPRESENTATIVE_SAMPLES = 256
 SUPPORTED_FL_FRAMEWORKS = ("fedavg", "fedavg_qat")
 SUPPORTED_DATASETS = ("cifar10", "mnist", "organamnist")
 SUPPORTED_NETWORKS = ("cnn", "mlp")
+FRAMEWORK_STRATEGY_NAMES = {
+    "fedavg": ("fedavg_plain", "fedavg_heversa"),
+    "fedavg_qat": ("fedavg_qat_plain", "fedavg_qat_heversa"),
+}
 MODEL_OUTPUT_DIR = Path("fl/models")
 RESULT_OUTPUT_DIR = Path("fl/results")
 KERAS_HOME_DIR = Path(".keras")
 MEDMNIST_CACHE_DIR = KERAS_HOME_DIR / "medmnist"
+ORGANAMNIST_FILENAME = "organamnist.npz"
+ORGANAMNIST_URL = "https://zenodo.org/records/10519652/files/organamnist.npz?download=1"
+ORGANAMNIST_MD5 = "68e3f8846a6bd62f0c9bf841c0d9eacc"
 NETWORK_MODULES = {
     "cnn": cnn,
     "mlp": mlp,
@@ -291,6 +299,18 @@ def get_network_module(network_name):
         raise ValueError(f"Unsupported network: {network_name}") from exc
 
 
+def network_model_config(network_name):
+    """Return the lightweight architecture signature for result reuse checks."""
+    network_module = get_network_module(network_name)
+    model_config = {}
+
+    for attr_name in ("CONV1_FILTERS", "CONV2_FILTERS", "FC_UNITS"):
+        if hasattr(network_module, attr_name):
+            model_config[attr_name.lower()] = int(getattr(network_module, attr_name))
+
+    return model_config
+
+
 def get_dataset_config(dataset_name):
     """Return dataset metadata selected by the CLI."""
     try:
@@ -483,33 +503,64 @@ def load_mnist_clients(num_clients, train_limit, test_limit, seed):
     return split_iid(x_train, y_train, num_clients, seed), (x_test, y_test)
 
 
-def load_medmnist_split(dataset_cls, split, repo_root):
-    """Load one MedMNIST split into numpy arrays."""
+def file_md5(path):
+    """Return the MD5 hex digest for a local file."""
+    digest = hashlib.md5()
+    with Path(path).open("rb") as file_obj:
+        for chunk in iter(lambda: file_obj.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def organamnist_cache_message(cache_path):
+    """Build a clear cache-preparation message for OrganAMNIST failures."""
+    return (
+        f"OrganAMNIST is required at {cache_path}. Run "
+        "python3 fl/download_organamnist.py from the repository root, "
+        f"or download {ORGANAMNIST_URL} manually and verify MD5 {ORGANAMNIST_MD5}."
+    )
+
+
+def ensure_organamnist_npz(repo_root):
+    """Return a verified cached OrganAMNIST npz path."""
     cache_dir = repo_root / MEDMNIST_CACHE_DIR
     cache_dir.mkdir(parents=True, exist_ok=True)
+    cache_path = cache_dir / ORGANAMNIST_FILENAME
 
+    if not cache_path.exists():
+        raise FileNotFoundError(organamnist_cache_message(cache_path))
+
+    actual_md5 = file_md5(cache_path)
+    if actual_md5 != ORGANAMNIST_MD5:
+        raise ValueError(
+            f"{cache_path} has MD5 {actual_md5}; expected {ORGANAMNIST_MD5}. "
+            "Run python3 fl/download_organamnist.py --force from the repository "
+            "root to replace it."
+        )
+
+    return cache_path
+
+
+def load_organamnist_split(npz_data, split):
+    """Load one OrganAMNIST split from the cached npz file."""
+    image_key = f"{split}_images"
+    label_key = f"{split}_labels"
     try:
-        dataset = dataset_cls(split=split, download=True, root=str(cache_dir), size=28)
-    except TypeError:
-        dataset = dataset_cls(split=split, download=True, root=str(cache_dir))
-
-    return np.asarray(dataset.imgs), np.asarray(dataset.labels)
+        return np.asarray(npz_data[image_key]), np.asarray(npz_data[label_key])
+    except KeyError as exc:
+        raise KeyError(
+            f"{ORGANAMNIST_FILENAME} does not contain expected key {exc.args[0]!r}."
+        ) from exc
 
 
 def load_organamnist_clients(num_clients, train_limit, test_limit, seed):
     """Load OrganAMNIST, normalize images, add a channel, and split train data."""
-    try:
-        from medmnist import OrganAMNIST
-    except ImportError as exc:
-        raise ModuleNotFoundError(
-            "OrganAMNIST requires the medmnist package. Install it in the "
-            "active environment with: python -m pip install medmnist"
-        ) from exc
-
     repo_root = Path(__file__).resolve().parents[1]
     with dataset_cache_lock("organamnist"):
-        x_train, y_train = load_medmnist_split(OrganAMNIST, "train", repo_root)
-        x_test, y_test = load_medmnist_split(OrganAMNIST, "test", repo_root)
+        npz_path = ensure_organamnist_npz(repo_root)
+        with np.load(npz_path) as npz_data:
+            x_train, y_train = load_organamnist_split(npz_data, "train")
+            x_test, y_test = load_organamnist_split(npz_data, "test")
     x_train, y_train, x_test, y_test = preprocess_image_data(
         x_train,
         y_train,
@@ -603,35 +654,165 @@ def safe_name(name):
     return name.strip().lower().replace(" ", "_").replace("-", "_")
 
 
-def experiment_name_parts(dataset_name, network_name, rep_name=None):
+def experiment_name_parts(dataset_name, network_name, rep_name=None, output_prefix=None):
     """Return stable filename parts shared by model and result outputs."""
-    parts = [safe_name(dataset_name), safe_name(network_name)]
+    parts = []
+    if output_prefix:
+        parts.append(safe_name(output_prefix))
+    parts.extend([safe_name(dataset_name), safe_name(network_name)])
     if rep_name:
         parts.append(safe_name(rep_name))
     return parts
 
 
-def model_output_path(strategy_name, dataset_name, network_name, rep_name=None):
+def model_output_path(
+    strategy_name,
+    dataset_name,
+    network_name,
+    rep_name=None,
+    output_prefix=None,
+):
     """Derive the TFLite output path from the selected strategy."""
+    experiment_name = "_".join(
+        experiment_name_parts(dataset_name, network_name, rep_name, output_prefix)
+    )
     return (
         MODEL_OUTPUT_DIR
-        / (
-            f"{'_'.join(experiment_name_parts(dataset_name, network_name, rep_name))}_"
-            f"{safe_name(strategy_name)}_int8.tflite"
-        )
+        / f"{experiment_name}_{safe_name(strategy_name)}_int8.tflite"
     )
 
 
-def results_output_path(strategy_names, dataset_name, network_name, rep_name=None):
+def results_output_path(
+    strategy_names,
+    dataset_name,
+    network_name,
+    rep_name=None,
+    output_prefix=None,
+):
     """Derive the JSON output path from the selected strategy comparison."""
-    comparison_name = "_vs_".join(safe_name(name) for name in strategy_names)
-    return (
-        RESULT_OUTPUT_DIR
-        / (
-            f"{'_'.join(experiment_name_parts(dataset_name, network_name, rep_name))}_"
-            f"{comparison_name}.json"
-        )
+    experiment_name = "_".join(
+        experiment_name_parts(dataset_name, network_name, rep_name, output_prefix)
     )
+    comparison_name = "_vs_".join(safe_name(name) for name in strategy_names)
+    return RESULT_OUTPUT_DIR / f"{experiment_name}_{comparison_name}.json"
+
+
+def expected_strategy_names(framework_name):
+    """Return the strategy names written by a framework without building models."""
+    try:
+        return FRAMEWORK_STRATEGY_NAMES[framework_name]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported FL framework: {framework_name}") from exc
+
+
+def expected_experiment_outputs(args):
+    """Return the result and model paths for the requested experiment."""
+    strategy_names = expected_strategy_names(args.fl_framework)
+    result_path = results_output_path(
+        strategy_names,
+        args.dataset,
+        args.network,
+        rep_name=args.rep_name,
+        output_prefix=args.output_prefix,
+    )
+    model_outputs = {
+        name: model_output_path(
+            name,
+            args.dataset,
+            args.network,
+            rep_name=args.rep_name,
+            output_prefix=args.output_prefix,
+        )
+        for name in strategy_names
+    }
+    return strategy_names, result_path, model_outputs
+
+
+def expected_experiment_config(args, protocol_config=None):
+    """Return the config keys that define whether outputs match this run."""
+    if protocol_config is None:
+        protocol_config = ProtocolConfig()
+
+    return {
+        "fl_framework": args.fl_framework,
+        "dataset": args.dataset,
+        "network": args.network,
+        "model_config": network_model_config(args.network),
+        "clients": protocol_config.num_clients,
+        "threshold": protocol_config.threshold,
+        "update_len": protocol_config.update_len,
+        "rounds": args.rounds,
+        "local_epochs": args.local_epochs,
+        "batch_size": args.batch_size,
+        "train_limit": args.train_limit,
+        "test_limit": args.test_limit,
+        "seed": args.seed,
+        "rep_name": args.rep_name,
+        "output_prefix": args.output_prefix,
+        "quant_scale": protocol_config.quant_scale,
+    }
+
+
+def output_file_present(path):
+    """Return True when an output file exists and is non-empty."""
+    try:
+        path = Path(path)
+        return path.is_file() and path.stat().st_size > 0
+    except OSError:
+        return False
+
+
+def result_file_present(path, args):
+    """Return True when the result JSON exists and matches this run config."""
+    if not output_file_present(path):
+        return False
+
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return False
+
+    actual_config = payload.get("config", {})
+    expected_config = expected_experiment_config(args)
+    return all(
+        actual_config.get(key) == value for key, value in expected_config.items()
+    )
+
+
+def experiment_outputs_complete(args):
+    """Return output completeness plus the expected result and model paths."""
+    _, result_path, model_outputs = expected_experiment_outputs(args)
+    if not result_file_present(result_path, args):
+        return False, result_path, model_outputs
+
+    models_present = all(output_file_present(path) for path in model_outputs.values())
+    return models_present, result_path, model_outputs
+
+
+def ensure_experiment_args(args):
+    """Fill defaults expected by direct callers before output checks."""
+    if not hasattr(args, "fl_framework"):
+        args.fl_framework = "fedavg"
+    if not hasattr(args, "dataset"):
+        args.dataset = "cifar10"
+    if not hasattr(args, "network"):
+        args.network = "cnn"
+    if not hasattr(args, "rounds"):
+        args.rounds = 3
+    if not hasattr(args, "local_epochs"):
+        args.local_epochs = 1
+    if not hasattr(args, "batch_size"):
+        args.batch_size = 64
+    if not hasattr(args, "train_limit"):
+        args.train_limit = 8000
+    if not hasattr(args, "test_limit"):
+        args.test_limit = 2000
+    if not hasattr(args, "seed"):
+        args.seed = 26
+    if not hasattr(args, "rep_name"):
+        args.rep_name = None
+    if not hasattr(args, "output_prefix") or not args.output_prefix:
+        args.output_prefix = None
 
 
 def compare_final_metrics(baseline_name, baseline_metrics, candidate_name, candidate_metrics):
@@ -669,22 +850,7 @@ def results_payload(args, protocol_config, strategy_names, metrics_by_variant, m
         )
 
     return {
-        "config": {
-            "fl_framework": args.fl_framework,
-            "dataset": args.dataset,
-            "network": args.network,
-            "clients": protocol_config.num_clients,
-            "threshold": protocol_config.threshold,
-            "update_len": protocol_config.update_len,
-            "rounds": args.rounds,
-            "local_epochs": args.local_epochs,
-            "batch_size": args.batch_size,
-            "train_limit": args.train_limit,
-            "test_limit": args.test_limit,
-            "seed": args.seed,
-            "rep_name": args.rep_name,
-            "quant_scale": protocol_config.quant_scale,
-        },
+        "config": expected_experiment_config(args, protocol_config),
         "model_outputs": model_outputs,
         **metrics_by_variant,
         "comparison": comparison,
@@ -717,27 +883,46 @@ def save_variant_tflite(result, output_path, representative_x, test_data, eval_t
 
 
 def train(args):
+    ensure_experiment_args(args)
+    complete, result_path, model_outputs = experiment_outputs_complete(args)
+    if complete:
+        experiment_label = f"{args.dataset} {args.network} {args.fl_framework}"
+        if args.output_prefix:
+            experiment_label = f"{args.output_prefix} {experiment_label}"
+        if args.rep_name:
+            experiment_label = f"{experiment_label} {args.rep_name}"
+        print(f"skipping completed experiment: {experiment_label}", flush=True)
+        print(f"existing results: {result_path}", flush=True)
+        for name, output_path in model_outputs.items():
+            print(f"existing {name} model: {output_path}", flush=True)
+        return
+
     repo_root = Path(__file__).resolve().parents[1]
     heversa = import_heversa(repo_root)
-    import_tensorflow()
     protocol_config = ProtocolConfig()
-    if not hasattr(args, "dataset"):
-        args.dataset = "cifar10"
-    if not hasattr(args, "network"):
-        args.network = "cnn"
-    if not hasattr(args, "rep_name"):
-        args.rep_name = None
     dataset_config = get_dataset_config(args.dataset)
+    load_data_before_tensorflow = args.dataset == "organamnist"
 
+    if load_data_before_tensorflow:
+        client_data, test_data = load_dataset_clients(
+            dataset_name=args.dataset,
+            num_clients=protocol_config.num_clients,
+            train_limit=args.train_limit,
+            test_limit=args.test_limit,
+            seed=args.seed,
+        )
+
+    import_tensorflow()
     set_random_seed(args.seed)
 
-    client_data, test_data = load_dataset_clients(
-        dataset_name=args.dataset,
-        num_clients=protocol_config.num_clients,
-        train_limit=args.train_limit,
-        test_limit=args.test_limit,
-        seed=args.seed,
-    )
+    if not load_data_before_tensorflow:
+        client_data, test_data = load_dataset_clients(
+            dataset_name=args.dataset,
+            num_clients=protocol_config.num_clients,
+            train_limit=args.train_limit,
+            test_limit=args.test_limit,
+            seed=args.seed,
+        )
 
     strategies = build_framework_strategies(
         framework_name=args.fl_framework,
@@ -793,6 +978,7 @@ def train(args):
                 args.dataset,
                 args.network,
                 rep_name=args.rep_name,
+                output_prefix=args.output_prefix,
             )
         )
         for result in results
@@ -822,9 +1008,22 @@ def train(args):
             args.dataset,
             args.network,
             rep_name=args.rep_name,
+            output_prefix=args.output_prefix,
         ),
         add_framework_config(args.fl_framework, payload),
     )
+
+
+def optional_int(value):
+    """Parse an optional integer CLI value, accepting none/null for no limit."""
+    if value is None:
+        return None
+
+    normalized = str(value).strip().lower()
+    if normalized in ("none", "null", ""):
+        return None
+
+    return int(value)
 
 
 def parse_args():
@@ -849,10 +1048,11 @@ def parse_args():
     parser.add_argument("--rounds", type=int, default=3)
     parser.add_argument("--local-epochs", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=64)
-    parser.add_argument("--train-limit", type=int, default=8000)
-    parser.add_argument("--test-limit", type=int, default=2000)
+    parser.add_argument("--train-limit", type=optional_int, default=8000)
+    parser.add_argument("--test-limit", type=optional_int, default=2000)
     parser.add_argument("--seed", type=int, default=26)
     parser.add_argument("--rep-name", default=None)
+    parser.add_argument("--output-prefix", default=None)
     parser.add_argument("--eval-tflite", action="store_true")
     return parser.parse_args()
 

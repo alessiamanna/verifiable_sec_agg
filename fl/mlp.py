@@ -22,7 +22,7 @@ except ImportError:
 
 DEFAULT_INPUT_SHAPE = (32, 32, 3)
 DEFAULT_NUM_CLASSES = 10
-FC_UNITS = 8
+FC_UNITS = 16
 
 
 def compile_classifier(tf, model):

@@ -77,9 +77,9 @@ CIFAR-10 is the default dataset. To run MNIST:
 
   python fl\fl_heversa.py --dataset mnist --fl-framework fedavg --rounds 1 --train-limit 1000 --test-limit 500
 
-To run OrganAMNIST, install MedMNIST once in the active environment:
+To run OrganAMNIST, download the npz into the repo-local cache once:
 
-  python -m pip install medmnist
+  python fl\download_organamnist.py
 
 Then run:
 
