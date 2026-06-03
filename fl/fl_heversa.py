@@ -32,10 +32,12 @@ except ImportError:
     )
 
 try:
-    from . import cnn, mlp
+    from . import cnn, cnn_medium, mlp, mlp_medium
 except ImportError:
     import cnn
+    import cnn_medium
     import mlp
+    import mlp_medium
 
 
 tf = None
@@ -56,7 +58,7 @@ KERAS_VERBOSE = 2
 REPRESENTATIVE_SAMPLES = 256
 SUPPORTED_FL_FRAMEWORKS = ("fedavg", "fedavg_qat")
 SUPPORTED_DATASETS = ("cifar10", "mnist", "organamnist")
-SUPPORTED_NETWORKS = ("cnn", "mlp")
+SUPPORTED_NETWORKS = ("cnn", "cnn_medium", "mlp", "mlp_medium")
 FRAMEWORK_STRATEGY_NAMES = {
     "fedavg": ("fedavg_plain", "fedavg_heversa"),
     "fedavg_qat": ("fedavg_qat_plain", "fedavg_qat_heversa"),
@@ -70,7 +72,9 @@ ORGANAMNIST_URL = "https://zenodo.org/records/10519652/files/organamnist.npz?dow
 ORGANAMNIST_MD5 = "68e3f8846a6bd62f0c9bf841c0d9eacc"
 NETWORK_MODULES = {
     "cnn": cnn,
+    "cnn_medium": cnn_medium,
     "mlp": mlp,
+    "mlp_medium": mlp_medium,
 }
 DATASET_LOCK_POLL_SECONDS = 5
 DATASET_CORRUPTION_EXCEPTIONS = (
@@ -304,7 +308,14 @@ def network_model_config(network_name):
     network_module = get_network_module(network_name)
     model_config = {}
 
-    for attr_name in ("CONV1_FILTERS", "CONV2_FILTERS", "FC_UNITS"):
+    for attr_name in (
+        "CONV1_FILTERS",
+        "CONV2_FILTERS",
+        "CONV3_FILTERS",
+        "FC_UNITS",
+        "FC1_UNITS",
+        "FC2_UNITS",
+    ):
         if hasattr(network_module, attr_name):
             model_config[attr_name.lower()] = int(getattr(network_module, attr_name))
 

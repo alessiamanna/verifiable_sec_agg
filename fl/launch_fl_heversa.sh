@@ -33,8 +33,8 @@ DATASETS=(
 )
 
 NETWORKS=(
-  cnn
-  mlp
+  cnn_medium
+  mlp_medium
 )
 
 REPETITIONS=(
