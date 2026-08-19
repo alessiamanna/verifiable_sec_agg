@@ -5,7 +5,7 @@ from pypuf.simulation import XORArbiterPUF
 
 CHAIN_LEN = 100
 PUF_SIZE = 128
-MAX_NUM_CLIENTS = 4
+MAX_NUM_CLIENTS = 10
 
 def pypuf_to_binary(bits):
     return np.array([1 if b == 1 else 0 for b in bits], dtype=np.uint8)
@@ -82,7 +82,6 @@ if __name__ == "__main__":
 
 // --- DEFINITIONS ---
 #define CHAIN_LEN 100
-#define MAX_NUM_CLIENTS 4
 #define PUF_SIZE_BYTE 16
 
 // ---------------- TRUSTED AUTHORITY CHAIN ----------------

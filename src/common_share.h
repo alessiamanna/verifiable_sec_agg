@@ -97,4 +97,11 @@ static inline bool node_is_dropout(const node_set_t* J, const node_set_t* J_prim
 protocol_key_t get_shared_key(node_id_t helper_node, node_id_t target_node);
 void compute_share_h(puf_resp_t puf_link, protocol_key_t key, uint8_t* share_out, size_t out_len);
 
+void recovery_topology_set_complete(int num_clients);
+void recovery_topology_set_custom(int num_clients, const node_set_t helper_targets[MAX_NUM_CLIENTS]);
+bool recovery_topology_is_configured_for(int num_clients);
+bool recovery_topology_has_edge(node_id_t helper, node_id_t target);
+void recovery_topology_get_targets(node_id_t helper, node_set_t* out_targets);
+
 #endif
+

@@ -5,6 +5,7 @@
 #include "common.h"
 #include "common_share.h"
 #include "puf_data.h"
+#include "msg_type.h"
 #include "sss/sss.h"
 
 
@@ -62,6 +63,14 @@ void server_db_init();
 
 // To recover offset during recovering phase
 uint8_t* server_db_get_offset(node_id_t helper_id, node_id_t target_id, share_db_idx_t idx);
+
+void server_db_set_threshold(int k);
+void server_db_store_commitments(ecc_point_t G1, ecc_point_t G2);
+void server_db_store_offset_cc(node_id_t node_id, uint8_t* offset_y, uint8_t* offset_z);
+void server_db_get_commitments(ecc_point_t out_G1, ecc_point_t out_G2);
+void server_db_get_offset_cc(node_id_t node_id, uint8_t* out_y, uint8_t* out_z);
+void server_receive_cc_value(node_cc_msg_t* msg);
+bool server_try_compute_cc_result(server_t* srv, srv_cc_result_t* out_msg);
 
 // ------ FSM STATES ------
 void srv_state_wait_updates(server_t* srv);

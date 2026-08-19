@@ -6,7 +6,7 @@
 
 #define TRANSPORT_CHAIN_LEN 8 //fixed length
 #define MASK_CHAIN_LEN 4
-#define SHARE_CHAIN_LEN 4
+#define SHARE_CHAIN_LEN 6
 
 //transport chain shared between a node and the server
 typedef struct{
@@ -34,6 +34,8 @@ typedef struct{
     puf_resp_t share_noise;
     puf_resp_t share_mask_verif;
     puf_resp_t share_noise_verif;
+    puf_resp_t share_cc1;
+    puf_resp_t share_cc2;
 } share_chain_t;
 
 typedef struct{

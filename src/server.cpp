@@ -12,11 +12,36 @@
 #include <stdio.h>
 #include <string.h>
 
-#define K 2 // SSS Threshold
-
+// SSS reconstruction threshold. Must match the threshold used by the TA when
+// it created the shares (ta_compute_offset), so it's set via server_db_set_threshold
+// instead of being hardcoded.
+static int sss_threshold = 2;
 
 // DB to store the offsets precomputed by the Trusted Authority
 static server_offset_db_t offset_db;
+
+// DB to store the consistency check public commitments and per-node offsets
+typedef struct{
+    uint8_t offset_y[ECC_SCALAR_LEN];
+    uint8_t offset_z[ECC_SCALAR_LEN];
+    bool valid;
+} cc_offset_entry_t;
+
+static ecc_point_t cc_commit_G1;
+static ecc_point_t cc_commit_G2;
+static bool cc_commitments_valid = false;
+static cc_offset_entry_t cc_offset_db[MAX_NUM_CLIENTS];
+
+// Collects w_j = h*y_j + z_j values submitted by nodes during the consistency
+// check round, then Lagrange-interpolates them at x=0 once enough have arrived.
+typedef struct{
+    node_id_t node_ids[MAX_NUM_CLIENTS];
+    ecc_scalar_t w[MAX_NUM_CLIENTS];
+    int count;
+    bool done;
+} cc_check_ctx_t;
+
+static cc_check_ctx_t cc_check_ctx;
 
 // Keeps reconstruction context for both verifiability and data
 static recon_ctx_t ctx_mask[MAX_NUM_CLIENTS];
@@ -65,9 +90,90 @@ static void vector_sub(update_t* acc, update_t* input) {
 
 // ------ SERVER FUNCTIONS ------
 
+// Set the SSS reconstruction threshold to match the one used by the TA to create the shares
+void server_db_set_threshold(int k){
+    sss_threshold = k;
+}
+
 // Initialize server DB with empty entries
 void server_db_init(){
     memset(&offset_db, 0, sizeof(offset_db));
+    memset(cc_commit_G1, 0, sizeof(cc_commit_G1));
+    memset(cc_commit_G2, 0, sizeof(cc_commit_G2));
+    cc_commitments_valid = false;
+    memset(cc_offset_db, 0, sizeof(cc_offset_db));
+    memset(&cc_check_ctx, 0, sizeof(cc_check_ctx));
+}
+
+// Store the public EC commitments G1 = Scc1*G, G2 = Scc2*G
+void server_db_store_commitments(ecc_point_t G1, ecc_point_t G2){
+    memcpy(cc_commit_G1, G1, ECC_POINT_LEN);
+    memcpy(cc_commit_G2, G2, ECC_POINT_LEN);
+    cc_commitments_valid = true;
+}
+
+// Store the offset that lets node `target` recover its share of Scc1/Scc2
+void server_db_store_offset_cc(node_id_t target, uint8_t* offset_y, uint8_t* offset_z){
+    if(target >= MAX_NUM_CLIENTS){
+        #if DEBUG
+            printf("[SERVER DB] Error Store CC: Node ID out of bounds (T:%d)\n", target);
+        #endif
+        return;
+    }
+    memcpy(cc_offset_db[target].offset_y, offset_y, ECC_SCALAR_LEN);
+    memcpy(cc_offset_db[target].offset_z, offset_z, ECC_SCALAR_LEN);
+    cc_offset_db[target].valid = true;
+}
+
+// Retrieve the public EC commitments
+void server_db_get_commitments(ecc_point_t G1, ecc_point_t G2){
+    if(!cc_commitments_valid){
+        #if DEBUG
+            printf("[SERVER DB] Error Get: CC commitments not initialized\n");
+        #endif
+        return;
+    }
+    memcpy(G1, cc_commit_G1, ECC_POINT_LEN);
+    memcpy(G2, cc_commit_G2, ECC_POINT_LEN);
+}
+
+// Retrieve the offset for node `target`'s share of Scc1/Scc2
+void server_db_get_offset_cc(node_id_t target, uint8_t* out_off_y, uint8_t* out_off_z){
+    if(target >= MAX_NUM_CLIENTS || !cc_offset_db[target].valid){
+        #if DEBUG
+            printf("[SERVER DB] Error Get CC: Node ID out of bounds or not set (T:%d)\n", target);
+        #endif
+        return;
+    }
+    memcpy(out_off_y, cc_offset_db[target].offset_y, ECC_SCALAR_LEN);
+    memcpy(out_off_z, cc_offset_db[target].offset_z, ECC_SCALAR_LEN);
+}
+
+// Accumulates a node's w_j value for this round's consistency check (idempotent per node)
+void server_receive_cc_value(node_cc_msg_t* msg){
+    if(cc_check_ctx.count >= MAX_NUM_CLIENTS) return;
+    for(int i = 0; i < cc_check_ctx.count; i++){
+        if(cc_check_ctx.node_ids[i] == msg->node_id) return;
+    }
+    cc_check_ctx.node_ids[cc_check_ctx.count] = msg->node_id;
+    memcpy(cc_check_ctx.w[cc_check_ctx.count], msg->w_j, ECC_SCALAR_LEN);
+    cc_check_ctx.count++;
+}
+
+// Once at least `sss_threshold` nodes have submitted w_j, interpolate W = h*Scc1 + Scc2
+// and fill out_msg. Returns false if not enough values have been collected yet.
+bool server_try_compute_cc_result(server_t* srv, srv_cc_result_t* out_msg){
+    if(cc_check_ctx.count < sss_threshold) return false;
+
+    ecc_scalar_t W;
+    ecc_shamir_interpolate_at_zero(cc_check_ctx.node_ids, cc_check_ctx.w, sss_threshold, W);
+
+    out_msg->type = MSG_SRV_SEND_CC_RESULT;
+    out_msg->srv_id = srv->srv_id;
+    memcpy(out_msg->W, W, ECC_SCALAR_LEN);
+
+    cc_check_ctx.done = true;
+    return true;
 }
 
 // Store offsets
@@ -170,14 +276,14 @@ static void accumulate_share(recon_ctx_t* ctx, node_id_t helper, node_id_t targe
 }
 
 static void try_reconstruction(recon_ctx_t* ctx, update_t* buffer_acc){
-    if(ctx->done || ctx->count < K) return;
-    
+    if(ctx->done || ctx->count < sss_threshold) return;
+
     update_t recovered_vector[UPDATE_LEN];
     int success_count = 0;
 
     for(int m = 0; m < UPDATE_LEN; m++) {
         uint8_t secret_buff[sss_MLEN];
-        if(sss_combine_shares(secret_buff, ctx->share[m], K) == 0){
+        if(sss_combine_shares(secret_buff, ctx->share[m], sss_threshold) == 0){
             memcpy(&recovered_vector[m], secret_buff, sizeof(update_t));
             success_count++;
         }
@@ -221,6 +327,7 @@ static void reset_ctx(server_t* srv){
     memset(srv->droppes_mask_hat, 0, sizeof(srv->droppes_mask_hat));
     memset(srv->active_noise_x,   0, sizeof(srv->active_noise_x));
     memset(srv->active_noise_hat, 0, sizeof(srv->active_noise_hat));
+    memset(&cc_check_ctx, 0, sizeof(cc_check_ctx));
 }
 
 

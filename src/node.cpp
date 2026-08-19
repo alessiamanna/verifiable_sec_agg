@@ -11,7 +11,84 @@
 #include "puf_utils.h"
 #include "crypto_utils.h"
 #include "puf_manager.h"
+#include "server.h"
 #include "sss/sss.h"
+
+#define CC_SIM 0xCCCC
+
+void node_cc_data(node_t* node){
+    #if DEBUG
+    printf("[NODE %d] Fetching consistency data\n", node->node_id);
+    #endif
+
+    server_db_get_commitments(node->consistency_data.G1, node->consistency_data.G2);
+
+    //mi devo prendere gli offset
+    uint8_t offset_y[ECC_SCALAR_LEN];
+    uint8_t offset_z[ECC_SCALAR_LEN];
+    server_db_get_offset_cc(node->node_id, offset_y, offset_z);
+
+    //ora recupero la puf response
+    ta_chains_t chains;
+    get_ta_chains(node->node_id, node->current_link_ta, &chains);
+
+    puf_resp_t puf_cc1 = chains.share_chain.share_cc1;
+    puf_resp_t puf_cc2 = chains.share_chain.share_cc2;
+
+    //in realtà potrei cambiarla ma mi scoccio
+    protocol_key_t k = get_shared_key(node->node_id, CC_SIM);
+
+
+    uint8_t mask_y[ECC_SCALAR_LEN];
+    uint8_t mask_z[ECC_SCALAR_LEN];
+
+    compute_share_h(puf_cc1, k, mask_y, ECC_SCALAR_LEN);
+    compute_share_h(puf_cc2, k, mask_z, ECC_SCALAR_LEN);
+
+    for(size_t j = 0; j < ECC_SCALAR_LEN; j++){
+        node->consistency_data.y_j[j] = offset_y[j] ^ mask_y[j];
+        node->consistency_data.z_j[j] = offset_z[j] ^ mask_z[j];
+    }
+
+}
+
+// Hashes the dropout list Z and computes w_j = h*y_j + z_j, a share (at the
+// same x as y_j/z_j) of h*Scc1 + Scc2 that the server can Lagrange-interpolate.
+void node_compute_cc_value(node_t* node, node_set_t* dropout_set, node_cc_msg_t* out_msg){
+    #if DEBUG
+    printf("[NODE %d] Computing consistency check value\n", node->node_id);
+    #endif
+
+    uint8_t h[SHA256_DIGEST];
+    hash_node_set_sha256(dropout_set, h);
+
+    ecc_scalar_t w_j;
+    ecc_scalar_mul_add_mod(h, node->consistency_data.y_j, node->consistency_data.z_j, w_j);
+
+    out_msg->type = MSG_NODE_SEND_CC_VALUE;
+    out_msg->node_id = node->node_id;
+    memcpy(out_msg->w_j, w_j, ECC_SCALAR_LEN);
+}
+
+// Verifies that the server's reconstructed W satisfies G^W == G1^h * G2 for the
+// same dropout list hash h. Returns false if the node should abort the round.
+bool node_verify_cc_result(node_t* node, node_set_t* dropout_set, srv_cc_result_t* result_msg){
+    uint8_t h[SHA256_DIGEST];
+    hash_node_set_sha256(dropout_set, h);
+
+    bool ok = ecc_verify_cc(node->consistency_data.G1, node->consistency_data.G2, h, result_msg->W);
+
+    if(!ok){
+        printf("[NODE %d] CONSISTENCY CHECK FAILED: server's dropout list is not consistent. Aborting round.\n", node->node_id);
+    }
+    #if DEBUG
+    else{
+        printf("[NODE %d] Consistency check passed\n", node->node_id);
+    }
+    #endif
+
+    return ok;
+}
 
 
 void node_setup(node_t *node, node_id_t node_id, io_interface_t io){
@@ -264,3 +341,4 @@ void node_state_wait_final(node_t *node){
 
     node->current_state = node_state_compute_update;
 }
+

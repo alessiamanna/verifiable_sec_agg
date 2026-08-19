@@ -11,7 +11,9 @@ typedef enum{
     MSG_SRV_SEND_DROP_LIST = 0x02,
     MSG_NODE_SEND_SHARES = 0x03,
     MSG_SRV_SEND_GLOBAL_UPDATE = 0x04,
-    MSG_TA_MASK_SETUP = 0x05
+    MSG_TA_MASK_SETUP = 0x05,
+    MSG_NODE_SEND_CC_VALUE = 0x06,
+    MSG_SRV_SEND_CC_RESULT = 0x07
 } msg_type;
 
 
@@ -84,5 +86,26 @@ typedef struct __attribute__((packed)) ta_mask_setup_s{
     update_t global_mask_sum[UPDATE_LEN];
     update_t global_mask_verif[UPDATE_LEN];
 } ta_mask_setup_t;
+
+// ------ CONSISTENCY CHECK MESSAGES ------
+
+// After receiving the dropout list Z_j, each alive node hashes it (h = SHA256(Z_j))
+// and sends w_j = h*y_j + z_j, a valid Shamir share (at the same x) of h*Scc1 + Scc2.
+typedef struct __attribute__((packed)) node_cc_msg_s{
+    msg_type type;
+    node_id_t node_id;
+
+    ecc_scalar_t w_j;
+} node_cc_msg_t;
+
+// Once enough w_j have been collected, the server interpolates
+// W = h*Scc1 + Scc2 and broadcasts it back so nodes can verify
+// G^W == G1^h * G2 before trusting the dropout list.
+typedef struct __attribute__((packed)) srv_cc_result_s{
+    msg_type type;
+    srv_id_t srv_id;
+
+    ecc_scalar_t W;
+} srv_cc_result_t;
 
 #endif

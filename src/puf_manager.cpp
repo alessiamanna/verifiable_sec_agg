@@ -50,4 +50,7 @@ void get_ta_chains(node_id_t node_id, puf_index_t base, ta_chains_t* out) {
     out->share_chain.share_noise       = cursor_ta_next(&c);
     out->share_chain.share_mask_verif  = cursor_ta_next(&c);
     out->share_chain.share_noise_verif = cursor_ta_next(&c);
+
+    out->share_chain.share_cc1 = cursor_ta_next(&c);
+    out->share_chain.share_cc2 = cursor_ta_next(&c);
 }

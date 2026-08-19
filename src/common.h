@@ -1,17 +1,19 @@
 #ifndef COMMON_H
 #define COMMON_H
 
+#include <cstdint>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include "int128.h"
+#include "sss.h"
 
 #define DEBUG 1
 
 #define INITIAL_LINK 0 
 
 #ifndef MAX_NUM_CLIENTS
-#define MAX_NUM_CLIENTS 4 //for now let's consider node A-B-C-D
+#define MAX_NUM_CLIENTS 10
 #endif
 
 #ifndef UPDATE_LEN
@@ -51,6 +53,10 @@
 
 #define SHA256_DIGEST 32
 
+//curva p256
+#define ECC_SCALAR_LEN 32
+#define ECC_POINT_LEN 33
+
 // Define 128bit data type. Requires C23.
 typedef UInt128 uint128_t;
 
@@ -65,6 +71,17 @@ typedef uint128_t payload_t;
 //each component should have the same size of the puf response (128bit)
 typedef uint128_t update_t;
 typedef uint128_t protocol_key_t; 
+
+//curve ecc e punto sulla curva
+typedef uint8_t ecc_scalar_t[ECC_SCALAR_LEN];
+typedef uint8_t ecc_point_t[ECC_POINT_LEN];
+
+typedef struct{
+    ecc_point_t G1;
+    ecc_point_t G2;
+    ecc_scalar_t y_j; // share of Scc1
+    ecc_scalar_t z_j; // share of Scc2
+} node_cc_setup_t;
 
 typedef uint16_t node_id_t;
 typedef uint16_t srv_id_t;
@@ -93,3 +110,4 @@ typedef struct{
 } io_interface_t;
 
 #endif
+

@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
+#include "crypto_utils.h"
 #include "msg_type.h"
 #include "puf_data.h"
 #include "server.h"
@@ -11,6 +12,7 @@
 #include "sss/sss.h"
 #include "puf_manager.h"
 
+#define CC_SIM 0xCCCC
 
 void secret_padding(uint8_t* padded_secret, puf_resp_t secret){
     memset(padded_secret, 0, sss_MLEN);
@@ -59,7 +61,7 @@ static void ta_offset_helper(int N, int K, puf_index_t base_idx, share_db_idx_t 
         }
 
         for (node_id_t helper = 0; helper < N; helper++) {
-            if (helper == target) continue;
+            if (helper == target || !recovery_topology_has_edge(helper, target)) continue;
 
             ta_chains_t helper_chains;
             get_ta_chains(helper, base_idx, &helper_chains);
@@ -140,4 +142,49 @@ void ta_send_global_masks(server_t* srv, int N, puf_index_t base_idx){
 
     printf("[TA] Global masks sent to server\n");
 }
+
+void ta_compute_cc_offset(int N, int K, puf_index_t base_idx){
+    printf("[TA] Generating CC offsets\n");
+
+    ecc_point_t G1, G2;
+    ecc_scalar_t Scc1, Scc2;
+
+    ecc_generate_cc(G1, G2, Scc1, Scc2);
+    server_db_store_commitments(G1, G2);
+
+    // Shares are created directly mod the curve order (not via the byte-wise sss
+    // library) so that they stay linearly combinable for the consistency check:
+    // w_j = h*y_j + z_j must Lagrange-interpolate to h*Scc1 + Scc2.
+    ecc_scalar_t shares_y[MAX_NUM_CLIENTS];
+    ecc_scalar_t shares_z[MAX_NUM_CLIENTS];
+    ecc_shamir_create_shares(Scc1, N, K, shares_y);
+    ecc_shamir_create_shares(Scc2, N, K, shares_z);
+
+    // per ciascuno degli N nodi fai le shre
+    for(node_id_t target = 0; target < N; target++){
+      ta_chains_t target_chains;
+      get_ta_chains(target, base_idx, &target_chains);
+
+      puf_resp_t puf_cc1 = target_chains.share_chain.share_cc1;
+      puf_resp_t puf_cc2 = target_chains.share_chain.share_cc2;
+      protocol_key_t k = simulated_key(target, CC_SIM);
+
+      uint8_t mask_y[ECC_SCALAR_LEN];
+      uint8_t mask_z[ECC_SCALAR_LEN];
+
+      compute_share_h(puf_cc1, k, mask_y, ECC_SCALAR_LEN);
+      compute_share_h(puf_cc2, k, mask_z, ECC_SCALAR_LEN);
+
+      uint8_t offset_y[ECC_SCALAR_LEN];
+      uint8_t offset_z[ECC_SCALAR_LEN];
+
+      for(size_t j = 0; j < ECC_SCALAR_LEN; j++){
+        offset_y[j] = shares_y[target][j] ^ mask_y[j];
+        offset_z[j] = shares_z[target][j] ^ mask_z[j];
+      }
+      server_db_store_offset_cc(target, offset_y, offset_z);
+    }
+    printf("[TA]: Consistency check offset generated\n");
+}
+
 
