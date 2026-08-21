@@ -1,3 +1,51 @@
-.cache/
-build/*
-!build/test.py
+# Build outputs
+build/
+build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+*.vcxproj
+*.vcxproj.filters
+*.sln
+*.pdb
+*.ilk
+*.obj
+*.lib
+*.exp
+*.dll
+*.exe
+*.pyd
+
+# Python cache and local environments
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+.keras/
+
+# Local editor and OS noise
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Generated FL artifacts
+fl/models/*
+fl/results/*
+!fl/models/.gitkeep
+!fl/results/.gitkeep
+!fl/models/README.md
+!fl/results/README.md
+fl/*.out
+fl/logs/*.out
+
+# Model/checkpoint artifacts wherever they are produced
+*.tflite
+*.keras
+*.h5
+*.ckpt
+*.onnx
