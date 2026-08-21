@@ -48,13 +48,15 @@ struct UInt128 {
         return *this;
     }
 
-    // TODO: scalar multiplication for verification
-    UInt128 operator*(uint32_t scalar) const{
-        UInt128 result = {0, 0, 0, 0};
-        for(uint32_t i = 0; i < scalar; i++){
-            result = result + *this;
+    UInt128 operator*(uint32_t scalar) const {
+        UInt128 res = {0};
+        uint64_t carry = 0;
+        for (int i = 0; i < 4; i++) {
+            uint64_t prod = static_cast<uint64_t>(data[i]) * scalar + carry;
+            res.data[i] = static_cast<uint32_t>(prod & 0xFFFFFFFF);
+            carry = prod >> 32;
         }
-        return result;
+        return res;
     }
 
     UInt128 operator-(const UInt128& rhs) const {
