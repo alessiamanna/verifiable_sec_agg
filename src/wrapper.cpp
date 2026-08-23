@@ -9,23 +9,17 @@ namespace py = pybind11;
 
 node_local_update_t py_client_mask_update(node_t& node, py::array_t<uint32_t> weights) {
     py::buffer_info buf = weights.request();
+    size_t len = buf.size;
+    const uint32_t* ptr = static_cast<const uint32_t*>(buf.ptr);
     
-    if (buf.size != UPDATE_LEN) {
-        throw std::runtime_error("Weights array must match compiled UPDATE_LEN.");
-    }
-    
-    uint32_t* ptr = static_cast<uint32_t*>(buf.ptr);
-    
-    auto out_msg = std::make_unique<node_local_update_t>();
-    
-    client_mask_update(&node, ptr, out_msg.get());
-    return *out_msg;
+    node_local_update_t out_msg;
+    client_mask_update(&node, ptr, len, &out_msg);
+    return out_msg;
 }
 
 py::array_t<uint32_t> py_server_aggregate_updates(server_t& srv) {
-    auto result = py::array_t<uint32_t>(UPDATE_LEN);
+    auto result = py::array_t<uint32_t>(srv.update_len);
     py::buffer_info buf = result.request();
-    
     uint32_t* ptr = static_cast<uint32_t*>(buf.ptr);
     
     server_aggregate_updates(&srv, ptr);
@@ -60,7 +54,6 @@ void py_configure_recovery_topology(int num_clients, const std::vector<std::vect
 
 PYBIND11_MODULE(heversa, m) {
     m.doc() = "Python bindings for the HeVerSa secure aggregation protocol";
-    m.attr("UPDATE_LEN") = UPDATE_LEN;
     m.attr("MAX_NUM_CLIENTS") = MAX_NUM_CLIENTS;
 
     py::class_<server_t>(m, "Server")
@@ -91,9 +84,9 @@ PYBIND11_MODULE(heversa, m) {
             return ids;
         });
 
-    m.def("ta_setup_protocol", [](int num_clients, int threshold, server_t& srv) {
-        ta_setup_protocol(num_clients, threshold, &srv);
-    }, "Setup the TA and Server");
+    m.def("ta_setup_protocol", [](int num_clients, int threshold, int update_len, server_t& srv) {
+        ta_setup_protocol(num_clients, threshold, static_cast<size_t>(update_len), &srv);
+    }, "Setup the TA and Server with dynamic update_len");
 
     m.def("configure_complete_recovery_topology", [](int num_clients) {
         configure_complete_recovery_topology(num_clients);
@@ -102,9 +95,9 @@ PYBIND11_MODULE(heversa, m) {
     m.def("configure_recovery_topology", &py_configure_recovery_topology,
           "Configure helper-to-target recovery edges before TA setup");
 
-    m.def("client_setup", [](node_t& node, int id) {
-        client_setup(&node, id);
-    }, "Setup a Client Node");
+    m.def("client_setup", [](node_t& node, int id, int update_len) {
+        client_setup(&node, id, static_cast<size_t>(update_len));
+    }, "Setup a Client Node with dynamic update_len");
 
     m.def("client_mask_update", &py_client_mask_update, "Generate an obfuscated update from numpy weights");
 
@@ -158,4 +151,3 @@ PYBIND11_MODULE(heversa, m) {
         return client_verify_cc_result(&node, &in_drop_msg, &result_msg);
     }, "Client verifies G^W == G1^h * G2; false means the round must be aborted");
 }
-

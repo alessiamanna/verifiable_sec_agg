@@ -5,7 +5,6 @@ find_package(OpenSSL REQUIRED)
 add_subdirectory(extern/pybind11)
 
 # set fallbacks default values
-set(UPDATE_LEN 16 CACHE STRING "Length of the model update array")
 set(MAX_NUM_CLIENTS 10 CACHE STRING "Maximum number of clients")
 
 set(PROTOCOL_SOURCES

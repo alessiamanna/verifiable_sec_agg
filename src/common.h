@@ -5,6 +5,9 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <vector>
+#include <memory>
+#include <cstring>
 #include "int128.h"
 #include "sss.h"
 
@@ -14,10 +17,6 @@
 
 #ifndef MAX_NUM_CLIENTS
 #define MAX_NUM_CLIENTS 10
-#endif
-
-#ifndef UPDATE_LEN
-#define UPDATE_LEN 16 // for now let's assume 128bit update, 16 bit x 8 components.
 #endif
 
 //TODO: these values should be generated through a random seed 

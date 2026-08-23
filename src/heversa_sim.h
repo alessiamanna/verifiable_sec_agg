@@ -7,7 +7,8 @@ void run_federated_round_sim(
     server_t* srv, 
     node_t* clients, 
     int num_clients, 
-    uint32_t client_weights[][UPDATE_LEN], 
+    size_t update_len,
+    const uint32_t* client_weights, 
     uint32_t* final_out_model
 );
 

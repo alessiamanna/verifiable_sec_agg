@@ -20,8 +20,9 @@ typedef struct {
 struct node_s{
     node_id_t node_id; //device ID
     srv_id_t srv_id; //ID of the server aggregating the updates
+    uint32_t update_len;
 
-    update_t data_update[UPDATE_LEN]; //update array
+    std::vector<update_t> data_update; //update array
     node_state_func_t current_state; //to keep track of the state in the automa
 
     puf_index_t current_link_ta; //to keep track of the current link used in the protocol
@@ -32,12 +33,18 @@ struct node_s{
     
     node_cc_data_t consistency_data;
 
+    // Pointer to messages for state machine
+    node_local_update_t* current_out_update;
+    srv_dropout_list_t* current_in_drop_msg;
+    node_shares_msg_t* current_out_shares;
+    srv_global_update_t* current_in_global;
+
     //HAL
     io_interface_t io;
 
 };
 
-void node_setup(node_t* node, node_id_t node_id, io_interface_t io);
+void node_setup(node_t* node, node_id_t node_id, size_t update_len, io_interface_t io);
 void run_node_state(node_t* node);
 
 void node_cc_data(node_t* node);

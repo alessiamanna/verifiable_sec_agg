@@ -1,33 +1,47 @@
 #include <stdio.h>
 #include <string.h>
 #include <memory>
+#include <vector>
+#include <cstdlib>
 #include "heversa_api.h"
 
 #define NUM_CLIENTS 10
 #define THRESHOLD 4
+#define TEST_UPDATE_LEN 35
 
-int main() {
-    printf("=== Starting HeVerSa API (10 Clients, 3 Dropouts) ===\n\n");
-
+int main(int argc, char* argv[]) {
+    size_t update_len = 16;
+    int num_clients = 10;
+    int threshold = 4;
+    if (argc > 1) {
+        update_len = static_cast<size_t>(std::strtoul(argv[1], nullptr, 10));
+    }
+    if (argc > 2) {
+        num_clients = std::atoi(argv[2]);
+    }
+    if (argc > 3) {
+        threshold = std::atoi(argv[3]);
+    }
+    if (num_clients > MAX_NUM_CLIENTS) {
+        printf("[ERROR] num_clients (%d) exceeds MAX_NUM_CLIENTS (%d)\n", num_clients, MAX_NUM_CLIENTS);
+        return 1;
+    }
+    printf("=== Starting HeVerSa Simulation ===\n");
+    printf("Parameters: update_len = %zu, num_clients = %d, threshold = %d\n\n", update_len, num_clients, threshold);
     server_t srv;
-    memset(&srv, 0, sizeof(server_t));
     srv.srv_id = 99;
 
+    auto clients = std::make_unique<node_t[]>(num_clients);
 
-    auto clients = std::make_unique<node_t[]>(NUM_CLIENTS);
-    for (int i = 0; i < NUM_CLIENTS; i++) {
-        memset(&clients[i], 0, sizeof(node_t));
+    ta_setup_protocol(num_clients, threshold, update_len, &srv);
+    for (int i = 0; i < num_clients; i++) {
+        client_setup(&clients[i], i, update_len);
     }
+    
 
-    ta_setup_protocol(NUM_CLIENTS, THRESHOLD, &srv);
-    for (int i = 0; i < NUM_CLIENTS; i++) {
-        client_setup(&clients[i], i);
-    }
-
-
-    auto client_weights = std::make_unique<uint32_t[][UPDATE_LEN]>(NUM_CLIENTS);
-    for (int i = 0; i < NUM_CLIENTS; i++) {
-        for (int j = 0; j < UPDATE_LEN; j++) {
+    std::vector<std::vector<uint32_t>> client_weights(num_clients, std::vector<uint32_t>(update_len));
+    for (int i = 0; i < num_clients; i++) {
+        for (int j = 0; j < update_len; j++) {
             client_weights[i][j] = (i + 1) * 10; 
         }
     }
@@ -36,12 +50,10 @@ int main() {
     // PHASE 1: Collect Updates
     // ==========================================
     printf("--- PHASE 1: Local Updates ---\n");
-    for (int i = 0; i < NUM_CLIENTS; i++) {
-
+    for (int i = 0; i < num_clients; i++) {
         auto update_msg = std::make_unique<node_local_update_t>();
         
-        client_mask_update(&clients[i], client_weights[i], update_msg.get());
-
+        client_mask_update(&clients[i], client_weights[i].data(), update_len, update_msg.get());
 
         if (i == 2 || i == 5 || i == 8) {
             printf("[Orchestrator] SIMULATING DROPOUT: Dropping Client %d's update!\n", i);
@@ -62,14 +74,11 @@ int main() {
     // ==========================================
     // PHASE 2.1: Consistency Check
     // ==========================================
-    // Each alive node hashes the announced dropout list and sends w_j = h*y_j + z_j.
-    // The server interpolates W once threshold values arrive, and each node checks
-    // G^W == G1^h * G2 before trusting the dropout list enough to reveal its shares.
     printf("\n--- PHASE 2.1: Consistency Check ---\n");
-    bool cc_passed[NUM_CLIENTS];
-    for (int i = 0; i < NUM_CLIENTS; i++) cc_passed[i] = false;
+    bool cc_passed[num_clients];
+    for (int i = 0; i < num_clients; i++) cc_passed[i] = false;
 
-    for (int i = 0; i < NUM_CLIENTS; i++) {
+    for (int i = 0; i < num_clients; i++) {
         bool is_dropout = false;
         for(int d = 0; d < dropouts.node_count; d++) {
             if(dropouts.node_id[d] == i) is_dropout = true;
@@ -87,7 +96,7 @@ int main() {
     if (!cc_ready) {
         printf("[SERVER] Not enough consistency check values collected, aborting round.\n");
     } else {
-        for (int i = 0; i < NUM_CLIENTS; i++) {
+        for (int i = 0; i < num_clients; i++) {
             bool is_dropout = false;
             for(int d = 0; d < dropouts.node_count; d++) {
                 if(dropouts.node_id[d] == i) is_dropout = true;
@@ -102,7 +111,7 @@ int main() {
     // PHASE 2.2: Share Exchange
     // ==========================================
     printf("\n--- PHASE 2.2: Share Exchange ---\n");
-    for (int i = 0; i < NUM_CLIENTS; i++) {
+    for (int i = 0; i < num_clients; i++) {
         bool is_dropout = false;
         for(int d = 0; d < dropouts.node_count; d++) {
             if(dropouts.node_id[d] == i) is_dropout = true;
@@ -110,11 +119,7 @@ int main() {
 
         if (!is_dropout && cc_passed[i]) {
             auto share_msg = std::make_unique<node_shares_msg_t>();
-            memset(share_msg.get(), 0, sizeof(node_shares_msg_t));
-
-            // Pass the authentic packet to the client
             client_compute_shares(&clients[i], server_drop_packet.get(), share_msg.get());
-
 
             if (share_msg->item_cnt > 0) {
                 server_receive_shares(&srv, share_msg.get());
@@ -126,14 +131,14 @@ int main() {
     // PHASE 3: Finalize
     // ==========================================
     printf("\n--- PHASE 3: Final Aggregation ---\n");
-    auto final_model = std::make_unique<uint32_t[]>(UPDATE_LEN);
+    auto final_model = std::make_unique<uint32_t[]>(update_len);
     server_aggregate_updates(&srv, final_model.get());
 
     printf("\n=== FINAL UNMASKED WEIGHTS ===\n");
-    for (int j = 0; j < 4; j++) { 
+    for (int j = 0; j < 4 && j < update_len; j++) { 
         printf("Feature[%d] = %u\n", j, final_model[j]);
     }
-    printf("...\nExpected value: 370\n");
-
+    
+    printf("...\nExpected value: %d\n", (num_clients >= 10) ? 370 : 0);
     return 0;
 }

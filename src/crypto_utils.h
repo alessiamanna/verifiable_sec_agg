@@ -5,19 +5,18 @@
 #include "common_share.h"
 #include "puf_data.h"
 
-// Wraps the HMAC sha256 implementation
+
+//wraps the HMAC sha256 implementation of the library
 void calc_hmac_sha256(const uint8_t* data, size_t data_len, const uint8_t* key, size_t key_len, hmac_t out_mac);
 
-// Function to verify if the HMACs match
+//function to verify if the HMACs match
 bool verify_hmac(const hmac_t hmac1, const hmac_t hmac2);
 
 void generate_expanded_mask(UInt128 seed, size_t M, uint16_t* out_mask);
-
-// Wrappers to handle the protocol messages with streaming zero-copy
-void sign_payload(const update_t* p1, const update_t* p2, puf_resp_t key, hmac_t out_mac);
+//wrappers to handle the protocol messages 
+void sign_payload(const update_t* p1, const update_t* p2, size_t len, puf_resp_t key, hmac_t out_mac);
 void sign_node_set(const node_set_t* set, puf_resp_t key, hmac_t out_mac);
 void sign_shares_list(const share_item_t* items, size_t count, puf_resp_t key, hmac_t out_mac);
-
 // ECC consistency check helpers
 void ecc_generate_cc(ecc_point_t out_G1, ecc_point_t out_G2, ecc_scalar_t out_Scc1, ecc_scalar_t out_Scc2);
 void hash_node_set_sha256(const node_set_t* set, uint8_t out_hash[SHA256_DIGEST]);

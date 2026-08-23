@@ -44,9 +44,8 @@ bool verify_hmac(const hmac_t hmac1, const hmac_t hmac2) {
     return memcmp(hmac1, hmac2, SHA256_DIGEST) == 0;
 }
 
-// Zero-copy streaming HMAC: feeds p1 and p2 directly into the hash context
-void sign_payload(const update_t* p1, const update_t* p2, puf_resp_t key, hmac_t out_mac) {
-    size_t single_array_size = sizeof(update_t) * UPDATE_LEN;  
+void sign_payload(const update_t* p1, const update_t* p2, size_t len, puf_resp_t key, hmac_t out_mac){
+    size_t single_array_size = sizeof(update_t) * len;   
     unsigned int mac_len = SHA256_DIGEST;
 
     HMAC_CTX* ctx = HMAC_CTX_new();
@@ -62,8 +61,21 @@ void sign_node_set(const node_set_t *set, puf_resp_t key, hmac_t out_mac) {
 }
 
 void sign_shares_list(const share_item_t* items, size_t count, puf_resp_t key, hmac_t out_mac) {
-    size_t payload_size = count * sizeof(share_item_t);
-    calc_hmac_sha256((const uint8_t*)items, payload_size, (const uint8_t*)&key, sizeof(puf_resp_t), out_mac);
+    HMAC_CTX* ctx = HMAC_CTX_new();
+    HMAC_Init_ex(ctx, (const uint8_t*)&key, sizeof(puf_resp_t), EVP_sha256(), NULL);
+    for (size_t i = 0; i < count; i++) {
+        HMAC_Update(ctx, (const uint8_t*)&items[i].target_node_id, sizeof(items[i].target_node_id));
+        HMAC_Update(ctx, (const uint8_t*)&items[i].type, sizeof(items[i].type));
+        if (!items[i].share_data.empty()) {
+            HMAC_Update(ctx, items[i].share_data.data(), items[i].share_data.size());
+        }
+        if (!items[i].share_verif.empty()) {
+            HMAC_Update(ctx, items[i].share_verif.data(), items[i].share_verif.size());
+        }
+    }
+    unsigned int mac_len = SHA256_DIGEST;
+    HMAC_Final(ctx, out_mac, &mac_len);
+    HMAC_CTX_free(ctx);
 }
 
 // SHA256 hash of the dropout node set, used as the challenge scalar h in the consistency check

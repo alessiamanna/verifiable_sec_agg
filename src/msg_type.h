@@ -26,12 +26,13 @@ typedef enum{
 // 3. n2 = H(y_j || y_hat_j || l_{i+2})
 //where y_j = x_j + d_i + d_{i+1} and y_hat_i = x_hat_i + d_{i+2} + d_{i+3}
 
-typedef struct __attribute__((packed)) node_local_update_s{
+typedef struct node_local_update_s{
     msg_type type;
     node_id_t node_id;
+    uint32_t len;
     
-    update_t n_0[UPDATE_LEN];
-    update_t n_1[UPDATE_LEN];
+    std::vector<update_t> n_0;
+    std::vector<update_t> n_1;
     hmac_t n_2;
 
 }node_local_update_t;
@@ -39,7 +40,7 @@ typedef struct __attribute__((packed)) node_local_update_s{
 // In the second phase of the protocol, each alive node sends a message containing:
 // 1. n5 = S = {S_0^{J,M}} and so on, where each subset is a set of virtual shares that J node can recover for the M node
 // 2. n6 = H(S || l_{i+4})
-typedef struct __attribute__((packed)) node_shares_msg_s{
+typedef struct node_shares_msg_s{
     msg_type type;
     node_id_t node_id;
 
@@ -68,23 +69,24 @@ typedef struct __attribute__((packed)) srv_dropout_list_s{
 //  2. n8 = x_hat_sum xor l_{i+6}
 //  3. n9 = H(x_sum || x_hat_sum || l_{i+7})
 
-typedef struct __attribute__((packed)) srv_global_update_s{
+typedef struct srv_global_update_s{
     msg_type type;
     srv_id_t srv_id;
     uint32_t num_participants;
-    update_t n_7[UPDATE_LEN];
-    update_t n_8[UPDATE_LEN];
+    uint32_t len;
+    std::vector<update_t> n_7;
+    std::vector<update_t> n_8;
     hmac_t n_9;
 } srv_global_update_t;
 
 // In the initialization procedure, the Trusted Authority sends precomputed masks to the server,
 // considering the sum of the mask of each node that can participate to the protocol
 
-typedef struct __attribute__((packed)) ta_mask_setup_s{
+typedef struct ta_mask_setup_s{
     msg_type type;
-
-    update_t global_mask_sum[UPDATE_LEN];
-    update_t global_mask_verif[UPDATE_LEN];
+    uint32_t len;
+    std::vector<update_t> global_mask_sum;
+    std::vector<update_t> global_mask_verif;
 } ta_mask_setup_t;
 
 // ------ CONSISTENCY CHECK MESSAGES ------

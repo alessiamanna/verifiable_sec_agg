@@ -13,7 +13,6 @@ if not "%~2"=="" set MAX_NUM_CLIENTS=%~2
 
 echo Configuration: UPDATE_LEN=%UPDATE_LEN%, MAX_NUM_CLIENTS=%MAX_NUM_CLIENTS%
 
-:: Check and add MSYS2 / MinGW to PATH if not already present
 where g++ >nul 2>&1
 if %errorlevel% neq 0 (
     if exist "C:\msys64\ucrt64\bin\g++.exe" (
@@ -28,7 +27,6 @@ if %errorlevel% neq 0 (
     )
 )
 
-:: Fix Windows Git symlink placeholders in src/sss
 if exist "src\sss\randombytes\randombytes.h" (
     copy /Y "src\sss\randombytes\randombytes.h" "src\sss\randombytes.h" >nul
 )
@@ -57,7 +55,7 @@ if %errorlevel% neq 0 ( echo [ERROR] Failed compiling randombytes.c & exit /b %e
 
 echo.
 echo [2/3] Compiling HeVerSa C++ Protocol Simulator...
-g++ -std=c++17 -O2 -DDEBUG=1 -DUPDATE_LEN=%UPDATE_LEN% -DMAX_NUM_CLIENTS=%MAX_NUM_CLIENTS% ^
+g++ -std=c++17 -O2 -DDEBUG=1 -DMAX_NUM_CLIENTS=%MAX_NUM_CLIENTS% ^
     -Isrc -Isrc/sss ^
     src/main_ta.cpp ^
     src/heversa_api.cpp ^

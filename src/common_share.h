@@ -31,13 +31,12 @@ typedef enum{
 } share_type_t;
 
 // define a single share S^{J,M}. It will always be a pair
-typedef struct __attribute__((packed)){
+typedef struct {
     node_id_t target_node_id; 
     share_type_t type;
 
-    share_val_t share_data[UPDATE_LEN][sss_SHARE_LEN];
-    share_val_t share_verif[UPDATE_LEN][sss_SHARE_LEN];
-
+    std::vector<uint8_t> share_data;
+    std::vector<uint8_t> share_verif;
 } share_item_t;
 
 //to handle dropout we have to define the following sets:
@@ -54,9 +53,13 @@ typedef struct{
 typedef node_set_t dropout_req_set_t;
 
 
+#include <array>
+
+typedef std::array<uint8_t, sss_SHARE_LEN> sss_share_t;
+
 // To keep track of already recovered shares
 typedef struct{
-    sss_Share share[UPDATE_LEN][MAX_NUM_CLIENTS];
+    std::vector<std::vector<sss_share_t>> share;
     int count;
     bool done;
 } recon_ctx_t;
