@@ -11,7 +11,9 @@
 #include "int128.h"
 #include "sss.h"
 
+#ifndef DEBUG
 #define DEBUG 1
+#endif
 
 #define INITIAL_LINK 0 
 
@@ -63,7 +65,7 @@ typedef UInt128 uint128_t;
 typedef uint128_t puf_resp_t;
 
 //define puf link, index in the array
-typedef uint8_t puf_index_t;
+typedef uint16_t puf_index_t;
 
 typedef uint128_t payload_t;
 

@@ -1,3 +1,6 @@
+#ifdef BENCHMARK_RUNTIME_PUF
+#include "bench/puf_data.h"
+#else
 #ifndef PUF_DATA_H
 #define PUF_DATA_H
 
@@ -1151,3 +1154,4 @@ const UInt128 PUF_CHAIN_SRV[CHAIN_LEN] = {
 };
 
 #endif // PUF_DATA_H
+#endif // BENCHMARK_RUNTIME_PUF

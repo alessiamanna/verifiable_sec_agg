@@ -72,6 +72,7 @@ void server_broadcast_dropouts(server_t* srv, srv_dropout_list_t* out_msg, node_
 }
 
 void client_compute_shares(node_t* node, const srv_dropout_list_t* in_drop_msg, node_shares_msg_t* out_msg){
+    node->current_state = node_state_wait_for_server;
     node->current_in_drop_msg = const_cast<srv_dropout_list_t*>(in_drop_msg);
     node->current_out_shares = out_msg;
 
@@ -88,6 +89,7 @@ void client_mask_update(node_t* node, const uint32_t* weights, size_t len, node_
         node->data_update[i] = UInt128::from_uint32(weights[i]);
     }
 
+    node->current_state = node_state_compute_update;
     node->current_out_update = out_msg;
     run_node_state(node);
     node->current_out_update = nullptr;
@@ -121,8 +123,10 @@ void server_aggregate_updates(server_t* srv, uint32_t* out_model){
 // ------ CONSISTENCY CHECK ------
 
 void client_compute_cc_value(node_t* node, const srv_dropout_list_t* in_drop_msg, node_cc_msg_t* out_msg){
+    node->current_in_drop_msg = const_cast<srv_dropout_list_t*>(in_drop_msg);
     node_set_t drop_set = in_drop_msg->n_3;
     node_compute_cc_value(node, &drop_set, out_msg);
+    node->current_in_drop_msg = nullptr;
 }
 
 void server_receive_cc_value_msg(server_t* srv, const node_cc_msg_t* msg){
@@ -136,4 +140,11 @@ bool server_finalize_cc_result(server_t* srv, srv_cc_result_t* out_msg){
 bool client_verify_cc_result(node_t* node, const srv_dropout_list_t* in_drop_msg, const srv_cc_result_t* result_msg){
     node_set_t drop_set = in_drop_msg->n_3;
     return node_verify_cc_result(node, &drop_set, const_cast<srv_cc_result_t*>(result_msg));
+}
+
+void client_verify_global_update(node_t* node, const srv_global_update_t* in_global_msg){
+    node->current_state = node_state_wait_final;
+    node->current_in_global = const_cast<srv_global_update_t*>(in_global_msg);
+    run_node_state(node);
+    node->current_in_global = nullptr;
 }

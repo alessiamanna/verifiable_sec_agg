@@ -34,4 +34,8 @@ bool server_finalize_cc_result(server_t* srv, srv_cc_result_t* out_msg);
 // Client checks the server's W against G1/G2; false means the round must be aborted
 bool client_verify_cc_result(node_t* node, const srv_dropout_list_t* in_drop_msg, const srv_cc_result_t* result_msg);
 
+// ------ FINAL VERIFICATION (Thesis Phase 7) ------
+// Client decrypts the global update (n_7, n_8), verifies HMAC n_9, and checks x_hat == A * x_sum + |J'| * B
+void client_verify_global_update(node_t* node, const srv_global_update_t* in_global_msg);
+
 #endif

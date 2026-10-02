@@ -31,13 +31,31 @@ struct ECCContext {
     }
 };
 
+struct HMACContext {
+    HMAC_CTX* ctx;
+
+    HMACContext() {
+        ctx = HMAC_CTX_new();
+        const uint8_t dummy_key[16] = {0};
+        HMAC_Init_ex(ctx, dummy_key, sizeof(dummy_key), EVP_sha256(), NULL);
+    }
+
+    ~HMACContext() {
+        if (ctx) HMAC_CTX_free(ctx);
+    }
+
+    static HMAC_CTX* get() {
+        static thread_local HMACContext instance;
+        return instance.ctx;
+    }
+};
+
 void calc_hmac_sha256(const uint8_t* data, size_t data_len, const uint8_t* key, size_t key_len, hmac_t out_mac) {
     unsigned int mac_len = SHA256_DIGEST;
- 
-    HMAC(EVP_sha256(), 
-         key, key_len, 
-         data, data_len, 
-         out_mac, &mac_len);
+    HMAC_CTX* ctx = HMACContext::get();
+    HMAC_Init_ex(ctx, key, static_cast<int>(key_len), NULL, NULL);
+    HMAC_Update(ctx, data, data_len);
+    HMAC_Final(ctx, out_mac, &mac_len);
 }
 
 bool verify_hmac(const hmac_t hmac1, const hmac_t hmac2) {
@@ -48,12 +66,11 @@ void sign_payload(const update_t* p1, const update_t* p2, size_t len, puf_resp_t
     size_t single_array_size = sizeof(update_t) * len;   
     unsigned int mac_len = SHA256_DIGEST;
 
-    HMAC_CTX* ctx = HMAC_CTX_new();
-    HMAC_Init_ex(ctx, (const uint8_t*)&key, sizeof(puf_resp_t), EVP_sha256(), NULL);
+    HMAC_CTX* ctx = HMACContext::get();
+    HMAC_Init_ex(ctx, (const uint8_t*)&key, sizeof(puf_resp_t), NULL, NULL);
     HMAC_Update(ctx, (const uint8_t*)p1, single_array_size);
     HMAC_Update(ctx, (const uint8_t*)p2, single_array_size);
     HMAC_Final(ctx, out_mac, &mac_len);
-    HMAC_CTX_free(ctx);
 }
 
 void sign_node_set(const node_set_t *set, puf_resp_t key, hmac_t out_mac) {
@@ -61,8 +78,8 @@ void sign_node_set(const node_set_t *set, puf_resp_t key, hmac_t out_mac) {
 }
 
 void sign_shares_list(const share_item_t* items, size_t count, puf_resp_t key, hmac_t out_mac) {
-    HMAC_CTX* ctx = HMAC_CTX_new();
-    HMAC_Init_ex(ctx, (const uint8_t*)&key, sizeof(puf_resp_t), EVP_sha256(), NULL);
+    HMAC_CTX* ctx = HMACContext::get();
+    HMAC_Init_ex(ctx, (const uint8_t*)&key, sizeof(puf_resp_t), NULL, NULL);
     for (size_t i = 0; i < count; i++) {
         HMAC_Update(ctx, (const uint8_t*)&items[i].target_node_id, sizeof(items[i].target_node_id));
         HMAC_Update(ctx, (const uint8_t*)&items[i].type, sizeof(items[i].type));
@@ -75,7 +92,6 @@ void sign_shares_list(const share_item_t* items, size_t count, puf_resp_t key, h
     }
     unsigned int mac_len = SHA256_DIGEST;
     HMAC_Final(ctx, out_mac, &mac_len);
-    HMAC_CTX_free(ctx);
 }
 
 // SHA256 hash of the dropout node set, used as the challenge scalar h in the consistency check

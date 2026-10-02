@@ -247,42 +247,38 @@ static bool get_share_target(server_t* srv, share_item_t* item, node_id_t target
     return true;
 }
 
-static void accumulate_share(recon_ctx_t* ctx, node_id_t helper, node_id_t target, int db_idx, const uint8_t* raw_share, size_t update_len){
+static void accumulate_share(recon_ctx_t* ctx, node_id_t helper, node_id_t target, int db_idx, const uint8_t* raw_share){
     if(ctx->done || ctx->count >= MAX_NUM_CLIENTS) return;
     
     uint8_t* off_ptr = server_db_get_offset(helper, target, static_cast<share_db_idx_t>(db_idx));    
     if(!off_ptr) return;
 
-    if (ctx->share.size() != update_len) {
-        ctx->share.assign(update_len, std::vector<sss_share_t>(MAX_NUM_CLIENTS));
+    if (ctx->share.size() != 1) {
+        ctx->share.assign(1, std::vector<sss_share_t>(MAX_NUM_CLIENTS));
     }
 
-    for(size_t m = 0; m < update_len; m++) {
-        for(size_t j = 0; j < sss_SHARE_LEN; j++){
-            size_t idx = m * sss_SHARE_LEN + j;
-            ctx->share[m][ctx->count][j] = raw_share[idx] ^ off_ptr[idx];
-        }
+    for(size_t j = 0; j < sss_SHARE_LEN; j++){
+        ctx->share[0][ctx->count][j] = raw_share[j] ^ off_ptr[j];
     }
     ctx->count++;
 }
 
-static void try_reconstruction(recon_ctx_t* ctx, update_t* buffer_acc, size_t update_len){
+static void try_reconstruction(recon_ctx_t* ctx, node_id_t target, update_t* buffer_acc, size_t update_len){
     if(ctx->done || ctx->count < sss_threshold) return;
 
-    std::vector<update_t> recovered_vector(update_len);
-    size_t success_count = 0;
+    uint8_t secret_buff[sss_MLEN];
+    if(sss_combine_shares(secret_buff, reinterpret_cast<const sss_Share*>(ctx->share[0].data()), sss_threshold) == 0){
+        puf_resp_t recovered_scalar;
+        memcpy(&recovered_scalar, secret_buff, sizeof(puf_resp_t));
 
-    for(size_t m = 0; m < update_len; m++) {
-        uint8_t secret_buff[sss_MLEN];
-        if(sss_combine_shares(secret_buff, reinterpret_cast<const sss_Share*>(ctx->share[m].data()), sss_threshold) == 0){
-            memcpy(&recovered_vector[m], secret_buff, sizeof(update_t));
-            success_count++;
-        }
-    }
+        std::vector<puf_resp_t> p_j(update_len);
+        get_device_specific_key(target, update_len, p_j.data());
 
-    if(success_count == update_len) {
+        std::vector<update_t> recovered_vector(update_len);
+        expand_puf_response(recovered_scalar, p_j.data(), update_len, recovered_vector.data());
+
         vector_add(buffer_acc, recovered_vector.data(), update_len);
-        ctx->done = true; 
+        ctx->done = true;
     }
 }
 
@@ -305,19 +301,19 @@ static void compute_global_result(update_t* out_vec, const update_t* aggr, const
 
 static void reset_ctx(server_t* srv){
     for(int i = 0; i < MAX_NUM_CLIENTS; i++){
-        ctx_mask[i].share.assign(srv->update_len, std::vector<sss_share_t>(MAX_NUM_CLIENTS));
+        ctx_mask[i].share.assign(1, std::vector<sss_share_t>(MAX_NUM_CLIENTS));
         ctx_mask[i].count = 0;
         ctx_mask[i].done = false;
 
-        ctx_noise[i].share.assign(srv->update_len, std::vector<sss_share_t>(MAX_NUM_CLIENTS));
+        ctx_noise[i].share.assign(1, std::vector<sss_share_t>(MAX_NUM_CLIENTS));
         ctx_noise[i].count = 0;
         ctx_noise[i].done = false;
 
-        ctx_mask_verif[i].share.assign(srv->update_len, std::vector<sss_share_t>(MAX_NUM_CLIENTS));
+        ctx_mask_verif[i].share.assign(1, std::vector<sss_share_t>(MAX_NUM_CLIENTS));
         ctx_mask_verif[i].count = 0;
         ctx_mask_verif[i].done = false;
 
-        ctx_noise_verif[i].share.assign(srv->update_len, std::vector<sss_share_t>(MAX_NUM_CLIENTS));
+        ctx_noise_verif[i].share.assign(1, std::vector<sss_share_t>(MAX_NUM_CLIENTS));
         ctx_noise_verif[i].count = 0;
         ctx_noise_verif[i].done = false;
     }
@@ -458,17 +454,17 @@ void srv_state_wait_recovery(server_t* srv){
             continue;
         }
 
-        accumulate_share(share_target.ctx_data, helper, target, share_target.db_idx_data, item->share_data.data(), len);
-        accumulate_share(share_target.ctx_verif, helper, target, share_target.db_idx_verif, item->share_verif.data(), len);
+        accumulate_share(share_target.ctx_data, helper, target, share_target.db_idx_data, item->share_data.data());
+        accumulate_share(share_target.ctx_verif, helper, target, share_target.db_idx_verif, item->share_verif.data());
     }
 
     for(int t = 0; t < MAX_NUM_CLIENTS; t++){
         if (node_is_present(&srv->Z_set, t)) {
-           try_reconstruction(&ctx_mask[t], srv->dropped_mask_x.data(), len);
-           try_reconstruction(&ctx_mask_verif[t], srv->droppes_mask_hat.data(), len);
+           try_reconstruction(&ctx_mask[t], static_cast<node_id_t>(t), srv->dropped_mask_x.data(), len);
+           try_reconstruction(&ctx_mask_verif[t], static_cast<node_id_t>(t), srv->droppes_mask_hat.data(), len);
         } else { 
-           try_reconstruction(&ctx_noise[t], srv->active_noise_x.data(), len);
-           try_reconstruction(&ctx_noise_verif[t], srv->active_noise_hat.data(), len);
+           try_reconstruction(&ctx_noise[t], static_cast<node_id_t>(t), srv->active_noise_x.data(), len);
+           try_reconstruction(&ctx_noise_verif[t], static_cast<node_id_t>(t), srv->active_noise_hat.data(), len);
         }
     }
 

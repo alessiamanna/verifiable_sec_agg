@@ -77,7 +77,35 @@ if %errorlevel% neq 0 (
 )
 
 echo.
-echo [3/3] Build succeeded: build\protocol_sim.exe
+echo [3/4] Build succeeded: build\protocol_sim.exe
+
+echo.
+echo [4/4] Compiling HeVerSa Single-Node Benchmark (MAX_NUM_CLIENTS=500)...
+g++ -std=c++17 -O2 -DDEBUG=0 -DBENCHMARK_RUNTIME_PUF=1 -DMAX_NUM_CLIENTS=500 ^
+    -Isrc/bench -Isrc -Isrc/sss ^
+    src/benchmark.cpp ^
+    src/sim_gen.cpp ^
+    src/bench/puf_data_bench.cpp ^
+    src/heversa_api.cpp ^
+    src/heversa_sim.cpp ^
+    src/node.cpp ^
+    src/server.cpp ^
+    src/ta.cpp ^
+    src/common_share.cpp ^
+    src/puf_manager.cpp ^
+    src/crypto_utils.cpp ^
+    build/sss.o build/hazmat.o build/tweetnacl.o build/randombytes.o ^
+    -lcrypto -lws2_32 -lcrypt32 ^
+    -o build/benchmark.exe
+
+if %errorlevel% neq 0 (
+    echo.
+    echo [ERROR] Benchmark compilation failed!
+    exit /b %errorlevel%
+)
+
+echo.
+echo Build succeeded: build\benchmark.exe
 echo.
 echo =======================================================
 echo   Running Simulation Test...
@@ -86,3 +114,4 @@ build\protocol_sim.exe
 
 echo.
 echo Build and execution finished successfully!
+

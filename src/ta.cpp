@@ -44,18 +44,10 @@ static void ta_offset_helper(int N, int K, size_t update_len, puf_index_t base_i
             default: return;
         }
 
-        std::vector<puf_resp_t> p_j(update_len);
-        get_device_specific_key(target, update_len, p_j.data()); 
-        
-        std::vector<update_t> expanded_secret(update_len);
-        expand_puf_response(secret_scalar, p_j.data(), update_len, expanded_secret.data()); 
-
-        std::vector<std::vector<sss_share_t>> real_shares(update_len, std::vector<sss_share_t>(N));
-        for (size_t m = 0; m < update_len; m++) {
-            uint8_t padded_secret[sss_MLEN];
-            secret_padding(padded_secret, expanded_secret[m]);
-            sss_create_shares(reinterpret_cast<sss_Share*>(real_shares[m].data()), padded_secret, N, K);
-        }
+        std::vector<sss_share_t> real_shares(N);
+        uint8_t padded_secret[sss_MLEN];
+        secret_padding(padded_secret, secret_scalar);
+        sss_create_shares(reinterpret_cast<sss_Share*>(real_shares.data()), padded_secret, N, K);
 
         for (node_id_t helper = 0; helper < N; helper++) {
             if (helper == target || !recovery_topology_has_edge(helper, target)) continue;
@@ -73,18 +65,15 @@ static void ta_offset_helper(int N, int K, size_t update_len, puf_index_t base_i
             }
 
             protocol_key_t k = simulated_key(helper, target);
-            size_t total_share_len = update_len * sss_SHARE_LEN;
-            std::vector<uint8_t> share_h(total_share_len);
-            compute_share_h(puf_h, k, share_h.data(), total_share_len);
+            uint8_t share_h[sss_SHARE_LEN];
+            compute_share_h(puf_h, k, share_h, sss_SHARE_LEN);
 
-            std::vector<uint8_t> offset(total_share_len);
-            for (size_t m = 0; m < update_len; m++) {
-                for (size_t j = 0; j < sss_SHARE_LEN; j++) {
-                    offset[m * sss_SHARE_LEN + j] = real_shares[m][helper][j] ^ share_h[m * sss_SHARE_LEN + j];
-                }
+            uint8_t offset[sss_SHARE_LEN];
+            for (size_t j = 0; j < sss_SHARE_LEN; j++) {
+                offset[j] = real_shares[helper][j] ^ share_h[j];
             }
 
-            server_db_store_offset(helper, target, db_idx, offset.data(), update_len);
+            server_db_store_offset(helper, target, db_idx, offset, 1);
         }
     }
 }

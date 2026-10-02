@@ -53,6 +53,18 @@ void node_compute_cc_value(node_t* node, node_set_t* dropout_set, node_cc_msg_t*
     printf("[NODE %d] Computing consistency check value\n", node->node_id);
     #endif
 
+    if (node->current_in_drop_msg) {
+        transport_chain_t srv_chain;
+        get_transport_chain(node->current_link_srv, &srv_chain);
+
+        hmac_t calc_hmac;
+        sign_node_set(dropout_set, srv_chain.l_3_hmac_drop, calc_hmac);
+        if (!verify_hmac(calc_hmac, node->current_in_drop_msg->n_4)) {
+            printf("[NODE %d] HMAC mismatch on dropout list!\n", node->node_id);
+            return;
+        }
+    }
+
     uint8_t h[SHA256_DIGEST];
     hash_node_set_sha256(dropout_set, h);
 
@@ -114,7 +126,8 @@ void node_state_compute_update(node_t *node){
 
     size_t len = node->update_len;
 
-    node_local_update_t local_update_msg;
+    node_local_update_t fallback_update_msg;
+    node_local_update_t& local_update_msg = node->current_out_update ? *node->current_out_update : fallback_update_msg;
     local_update_msg.type = MSG_NODE_SEND_LOCAL_UPDATE;
     local_update_msg.node_id = node->node_id;
     local_update_msg.len = static_cast<uint32_t>(len);
@@ -127,21 +140,28 @@ void node_state_compute_update(node_t *node){
     transport_chain_t srv_chain;
     get_transport_chain(node->current_link_srv, &srv_chain);
 
-    std::vector<puf_resp_t> p_j(len);
+    static thread_local std::vector<puf_resp_t> p_j;
+    static thread_local std::vector<update_t> mask_data;
+    static thread_local std::vector<update_t> noise_data;
+    static thread_local std::vector<update_t> mask_verif;
+    static thread_local std::vector<update_t> noise_verif;
+    static thread_local std::vector<update_t> temp_update;
+    static thread_local std::vector<update_t> temp_verif;
+
+    p_j.resize(len);
+    mask_data.resize(len);
+    noise_data.resize(len);
+    mask_verif.resize(len);
+    noise_verif.resize(len);
+    temp_update.resize(len);
+    temp_verif.resize(len);
+
     get_device_specific_key(node->node_id, len, p_j.data());
-   
-    std::vector<update_t> mask_data(len);
-    std::vector<update_t> noise_data(len);
-    std::vector<update_t> mask_verif(len);
-    std::vector<update_t> noise_verif(len);
 
     expand_puf_response(ta_chains.mask_chain.d_mask_data, p_j.data(), len, mask_data.data());
     expand_puf_response(ta_chains.mask_chain.d_noise_data, p_j.data(), len, noise_data.data());
     expand_puf_response(ta_chains.mask_chain.d_mask_verif, p_j.data(), len, mask_verif.data());
     expand_puf_response(ta_chains.mask_chain.d_noise_verif, p_j.data(), len, noise_verif.data());
-
-    std::vector<update_t> temp_update(len);
-    std::vector<update_t> temp_verif(len);
 
     for(size_t i = 0; i < len; i++){
         update_t x = node->data_update[i];
@@ -157,10 +177,6 @@ void node_state_compute_update(node_t *node){
     }
 
     sign_payload(temp_update.data(), temp_verif.data(), len, srv_chain.l_2_hmac_local, local_update_msg.n_2);
-
-    if (node->current_out_update) {
-        *node->current_out_update = local_update_msg;
-    }
 
     #if DEBUG
         printf("[NODE %d] Update sent \n", node->node_id);
@@ -178,33 +194,22 @@ void node_state_wait_for_server(node_t *node){
 
     ta_chains_t ta_chains;
     get_ta_chains(node->node_id, node->current_link_ta, &ta_chains);
-    srv_dropout_list_t srv_dropout_msg;
-
-    if (node->current_in_drop_msg) {
-        srv_dropout_msg = *node->current_in_drop_msg;
-    } else {
+    if (!node->current_in_drop_msg) {
         return;
     }
+    const srv_dropout_list_t& srv_dropout_msg = *node->current_in_drop_msg;
 
     #if DEBUG
     printf("[NODE %d] Received dropout set from the server. Checking if shares can be recovered \n", node->node_id);
     #endif
 
-    hmac_t calc_hmac;
-    node_set_t local_z_set = srv_dropout_msg.n_3;
-    sign_node_set(&local_z_set, srv_chain.l_3_hmac_drop, calc_hmac);    
-    if(!verify_hmac(calc_hmac, srv_dropout_msg.n_4)){
-        printf("[NODE %d] HMAC mismatch on dropout list!\n", node->node_id);
-        return;
-    }
-
-    node_shares_msg_t share_rec_msg;
+    static thread_local node_shares_msg_t fallback_shares_msg;
+    node_shares_msg_t& share_rec_msg = node->current_out_shares ? *node->current_out_shares : fallback_shares_msg;
     share_rec_msg.type = MSG_NODE_SEND_SHARES;
     share_rec_msg.node_id = node->node_id;
     share_rec_msg.item_cnt = 0;
 
-    node_set_t Z_j = srv_dropout_msg.n_3;
-    size_t len = node->update_len;
+    const node_set_t& Z_j = srv_dropout_msg.n_3;
 
     for(int i = 0; i < node->K_j.node_count; i++){
         if (share_rec_msg.item_cnt >= MAX_SHARES) break; 
@@ -215,27 +220,23 @@ void node_state_wait_for_server(node_t *node){
 
         share_item_t* item_data = &share_rec_msg.items[share_rec_msg.item_cnt];
         item_data->target_node_id = target_id;
-        item_data->share_data.resize(len * sss_SHARE_LEN);
-        item_data->share_verif.resize(len * sss_SHARE_LEN);
+        item_data->share_data.resize(sss_SHARE_LEN);
+        item_data->share_verif.resize(sss_SHARE_LEN);
 
         if(is_dropout){
             item_data->type = SHARE_TYPE_MASK;
-            compute_share_h(ta_chains.share_chain.share_mask, shared_key, item_data->share_data.data(), len * sss_SHARE_LEN);
-            compute_share_h(ta_chains.share_chain.share_mask_verif, shared_key, item_data->share_verif.data(), len * sss_SHARE_LEN);
+            compute_share_h(ta_chains.share_chain.share_mask, shared_key, item_data->share_data.data(), sss_SHARE_LEN);
+            compute_share_h(ta_chains.share_chain.share_mask_verif, shared_key, item_data->share_verif.data(), sss_SHARE_LEN);
         }
         else{
             item_data->type = SHARE_TYPE_NOISE;
-            compute_share_h(ta_chains.share_chain.share_noise, shared_key, item_data->share_data.data(), len * sss_SHARE_LEN);
-            compute_share_h(ta_chains.share_chain.share_noise_verif, shared_key, item_data->share_verif.data(), len * sss_SHARE_LEN);
+            compute_share_h(ta_chains.share_chain.share_noise, shared_key, item_data->share_data.data(), sss_SHARE_LEN);
+            compute_share_h(ta_chains.share_chain.share_noise_verif, shared_key, item_data->share_verif.data(), sss_SHARE_LEN);
         }
         share_rec_msg.item_cnt++;
     }
 
     sign_shares_list(share_rec_msg.items, share_rec_msg.item_cnt, srv_chain.l_4_hmac_shares, share_rec_msg.n_6);
-
-    if (node->current_out_shares) {
-        *node->current_out_shares = share_rec_msg;
-    }
 
     node->current_state = node_state_wait_final;
 }
@@ -248,16 +249,16 @@ void node_state_wait_final(node_t *node){
     transport_chain_t srv_chain;
     get_transport_chain(node->current_link_srv, &srv_chain);
 
-    srv_global_update_t final_msg;
-    if (node->current_in_global) {
-        final_msg = *node->current_in_global;
-    } else {
+    if (!node->current_in_global) {
         return;
     }
+    const srv_global_update_t& final_msg = *node->current_in_global;
 
     size_t len = final_msg.len;
-    std::vector<update_t> clean_sum(len);
-    std::vector<update_t> clean_verif(len);
+    static thread_local std::vector<update_t> clean_sum;
+    static thread_local std::vector<update_t> clean_verif;
+    clean_sum.resize(len);
+    clean_verif.resize(len);
 
     for(size_t i = 0; i < len; i++){
         clean_sum[i] = decrypt_puf(final_msg.n_7[i], srv_chain.l_5_final_data);
@@ -274,6 +275,7 @@ void node_state_wait_final(node_t *node){
 
     uint32_t N_participants = final_msg.num_participants;
 
+    #if DEBUG
     printf("[NODE %d DEBUG] Decrypted Values (First 3):\n", node->node_id);
     if (len > 0) {
         printf("   -> Sum Data:  %u", clean_sum[0].data[0]);
@@ -286,6 +288,7 @@ void node_state_wait_final(node_t *node){
         if (len > 2) printf(", %u", clean_verif[2].data[0]);
         printf(" ...\n");
     }
+    #endif
     
     int errors = 0;
     for(size_t i = 0; i < len; i++){
@@ -295,19 +298,16 @@ void node_state_wait_final(node_t *node){
             errors++;
             #if DEBUG
             printf("[NODE %d] Math mismatch at idx %zu\n", node->node_id, i);
-            #endif
-
             printf("[NODE %d ERROR] Math Mismatch at index %zu:\n", node->node_id, i);
             printf("   -> Data: %u\n", clean_sum[i].data[0]);
             printf("   -> Expected Verif (Data*A+B): %u\n", expected_verif.data[0]);
             printf("   -> Actual Verif (Received):   %u\n", clean_verif[i].data[0]);
+            #endif
         }
     }
 
     if(errors > 0){
-        #if DEBUG
         printf("[NODE %d] VERIFIABILITY ERROR: Server result is mathematically invalid (%d errors)\n", node->node_id, errors);
-        #endif
         return;
     }
 
@@ -315,7 +315,7 @@ void node_state_wait_final(node_t *node){
     printf("[NODE %d] Round completed successfully. Result verified.\n", node->node_id);
     #endif
 
-    node->data_update = clean_sum;
+    memcpy(node->data_update.data(), clean_sum.data(), len * sizeof(update_t));
 
     node->current_link_ta += MASK_CHAIN_LEN + SHARE_CHAIN_LEN;
     node->current_link_srv += TRANSPORT_CHAIN_LEN;

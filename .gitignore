@@ -1,4 +1,5 @@
 # Build outputs
+phase_bench/
 build/
 build-*/
 CMakeFiles/

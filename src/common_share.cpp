@@ -77,7 +77,6 @@ protocol_key_t get_shared_key(node_id_t node_helper, node_id_t node_target) {
 
 
 void compute_share_h(puf_resp_t puf_link, protocol_key_t key, uint8_t* out_share, size_t out_len) {
-    memset(out_share, 0, out_len);
     hmac_t seed_hash;
     calc_hmac_sha256((uint8_t*)&puf_link, sizeof(puf_resp_t), (uint8_t*)&key, sizeof(protocol_key_t), seed_hash);
    

@@ -20,7 +20,9 @@ typedef enum{
 
 
 // per ora faccio allocazione statica
-#define MAX_SHARES 10
+#ifndef MAX_SHARES
+#define MAX_SHARES MAX_NUM_CLIENTS
+#endif
 
 typedef uint8_t share_val_t;
 typedef uint32_t share_cnt_t;
@@ -47,7 +49,7 @@ typedef struct {
 
 typedef struct{
     node_id_t node_id[MAX_NUM_CLIENTS];
-    uint8_t node_count;
+    uint16_t node_count;
 } node_set_t;
 
 typedef node_set_t dropout_req_set_t;
